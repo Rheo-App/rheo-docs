@@ -1,0 +1,41 @@
+---
+title: Rheo Developer Docs
+description: Documentation for the Rheo Integration API — connect your inventory system to Tradera and the Rheo marketplace.
+template: splash
+hero:
+  tagline: Connect your inventory to Tradera and the Rheo marketplace in minutes.
+  actions:
+    - text: Quick Start
+      link: /integration/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: API Reference
+      link: /integration/endpoints/
+      icon: open-book
+---
+
+## What is the Rheo Integration API?
+
+The Rheo Integration API lets B2B partners — demolition plants, parts dealers, wholesalers — push inventory into Rheo and have it automatically published as Tradera auctions.
+
+**One `PUT` call per item. Rheo handles the rest:**
+
+- Downloads your images and stores them on our CDN
+- Publishes the item as a Tradera auction under your account
+- Monitors the auction every 15 minutes
+- Sends you a signed webhook when anything changes — listing live, sold, ended
+
+## Key concepts
+
+| Concept | Description |
+|---|---|
+| `external_id` | Your internal item ID (e.g. ERP part number). Used in all API calls. Rheo never changes it. |
+| `x-api-key` | Authentication header. Generated in the Rheo partner dashboard. |
+| Webhook | Signed HTTP POST Rheo sends to your endpoint on listing events. |
+| `X-Rheo-Signature` | HMAC-SHA256 header on every webhook. Verify it before processing. |
+
+## Base URL
+
+```
+https://market.rheo.se
+```

@@ -1,0 +1,116 @@
+---
+title: Quick Start
+description: Push your first item to Tradera in under 5 minutes.
+sidebar:
+  order: 2
+---
+
+## Prerequisites
+
+- A Rheo partner account (contact sales@rheo.se)
+- Your API key from the Rheo partner dashboard
+- A publicly accessible HTTPS endpoint to receive webhooks (optional for testing)
+
+## Step 1 — Generate an API key
+
+In the Rheo partner dashboard, go to **Integration** and click **Generate API key**. Give it a descriptive name (e.g. `Recopart Production`).
+
+You will see the full key **once**. Copy it now and store it in your secrets manager.
+
+```
+rheo_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+## Step 2 — Push an item
+
+```http
+PUT https://market.rheo.se/integration/v1/items/ERP_PART_12345
+x-api-key: rheo_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Content-Type: application/json
+
+{
+  "title": "Volvo XC90 bromsok fram vänster — 2018",
+  "description": "Testad och fungerande. Skick B.",
+  "price": 950,
+  "shippingCost": 149,
+  "weightKg": 3.2,
+  "imageUrls": [
+    "https://your-cdn.example.com/parts/12345/1.jpg",
+    "https://your-cdn.example.com/parts/12345/2.jpg"
+  ],
+  "domain": {
+    "domain": "automotive_part",
+    "oemCode": "31400452",
+    "manufacturer": "Volvo",
+    "compatibleModels": ["XC90"],
+    "donorVehicleYear": 2018,
+    "conditionGrade": "B"
+  },
+  "autoPublishTradera": true
+}
+```
+
+A `202 Accepted` response means Rheo has queued the item. Processing (image download + Tradera publish) completes within 30 seconds.
+
+## Step 3 — Check status
+
+```http
+GET https://market.rheo.se/integration/v1/items/ERP_PART_12345
+x-api-key: rheo_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+```json
+{
+  "externalId": "ERP_PART_12345",
+  "rheoItemId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "rheoStatus": "active",
+  "traderaStatus": "active",
+  "traderaAdId": "398271634",
+  "traderaAdUrl": "https://www.tradera.com/item/398271634",
+  "price": 950
+}
+```
+
+## Step 4 — Configure a webhook
+
+In the partner dashboard, go to **Integration → Webhook Settings** and set your endpoint URL.
+
+Copy the **Webhook Secret** shown on that page. You will use it to verify incoming webhooks.
+
+When the Tradera auction goes live you will receive:
+
+```json
+{
+  "eventId": "evt_01j2k3...",
+  "eventType": "listing.created",
+  "timestamp": "2026-05-26T10:00:00Z",
+  "data": {
+    "externalId": "ERP_PART_12345",
+    "rheoItemId": "3fa85f64-...",
+    "platform": "tradera",
+    "salePrice": 0,
+    "currency": "SEK",
+    "traderaAdId": "398271634",
+    "traderaAdUrl": "https://www.tradera.com/item/398271634"
+  }
+}
+```
+
+When it sells:
+
+```json
+{
+  "eventId": "evt_01j2k4...",
+  "eventType": "item.sold",
+  "timestamp": "2026-05-27T14:32:00Z",
+  "data": {
+    "externalId": "ERP_PART_12345",
+    "platform": "tradera",
+    "salePrice": 1100,
+    "currency": "SEK",
+    "traderaAdId": "398271634"
+  }
+}
+```
+
+See [Webhooks](/integration/webhooks/) for signature verification code.

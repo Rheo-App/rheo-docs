@@ -1,0 +1,149 @@
+---
+title: Webhooks
+description: Receive real-time push notifications for listing events.
+sidebar:
+  order: 5
+---
+
+## Overview
+
+Rheo sends a signed `POST` request to your configured webhook URL whenever an item's status changes on Tradera.
+
+Configure your webhook URL in the partner dashboard under **Integration → Webhook Settings**.
+
+---
+
+## Events
+
+### listing.created
+
+Fired when a Tradera auction goes live (within ~30 seconds of the `PUT` call with `autoPublishTradera: true`).
+
+```json
+{
+  "eventId": "evt_01j2k3m4n5p6q7r8s9t0",
+  "eventType": "listing.created",
+  "timestamp": "2026-05-26T10:00:00Z",
+  "data": {
+    "externalId": "ERP_PART_12345",
+    "rheoItemId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "platform": "tradera",
+    "salePrice": 0,
+    "currency": "SEK",
+    "traderaAdId": "398271634",
+    "traderaAdUrl": "https://www.tradera.com/item/398271634"
+  }
+}
+```
+
+### item.sold
+
+Fired when the Tradera auction ends with a winning bid. `salePrice` is the final hammer price in SEK.
+
+```json
+{
+  "eventId": "evt_...",
+  "eventType": "item.sold",
+  "timestamp": "2026-05-27T14:32:00Z",
+  "data": {
+    "externalId": "ERP_PART_12345",
+    "rheoItemId": "3fa85f64-...",
+    "platform": "tradera",
+    "salePrice": 1100,
+    "currency": "SEK",
+    "traderaAdId": "398271634"
+  }
+}
+```
+
+### listing.ended
+
+Fired when a Tradera auction closes without a winning bid.
+
+```json
+{
+  "eventId": "evt_...",
+  "eventType": "listing.ended",
+  "timestamp": "2026-05-27T14:00:00Z",
+  "data": {
+    "externalId": "ERP_PART_12345",
+    "platform": "tradera",
+    "salePrice": 0,
+    "currency": "SEK",
+    "traderaAdId": "398271634"
+  }
+}
+```
+
+### listing.failed
+
+Fired if Rheo could not publish the Tradera auction (e.g. expired Tradera token, Tradera API outage). The `error` field describes the cause.
+
+```json
+{
+  "eventId": "evt_...",
+  "eventType": "listing.failed",
+  "timestamp": "2026-05-26T10:05:00Z",
+  "data": {
+    "externalId": "ERP_PART_12345",
+    "platform": "tradera",
+    "salePrice": 0,
+    "currency": "SEK",
+    "error": "Tradera token has expired. Partner must reconnect their Tradera account."
+  }
+}
+```
+
+---
+
+## Signature verification
+
+Every webhook includes an `X-Rheo-Signature` header:
+
+```
+X-Rheo-Signature: sha256=a4b2c9d1e3f5...
+```
+
+This is `HMAC-SHA256(rawBody, webhookSecret)` where `webhookSecret` is the `whsec_...` value from your dashboard.
+
+**Reject any webhook that fails signature verification.**
+
+See [Authentication](/integration/authentication/) for verification code in C#, TypeScript, and Python.
+
+---
+
+## Delivery guarantees
+
+- Rheo retries failed deliveries up to **5 times** with exponential backoff (1 s, 2 s, 4 s, 8 s, 16 s).
+- A delivery is considered failed if your endpoint returns a non-2xx status or does not respond within 10 seconds.
+- After 5 failed attempts the event is logged as `failed` in the webhook delivery log and no further retries are made.
+
+Check the **webhook delivery log** in the partner dashboard to inspect recent attempts and error messages.
+
+---
+
+## Best practices
+
+**Respond quickly, process asynchronously.** Return `200 OK` immediately and handle the event in a background job. If your handler takes more than 10 seconds, Rheo marks the delivery as failed and retries.
+
+**Make handlers idempotent.** Rheo guarantees at-least-once delivery. You may receive the same event more than once (e.g. after a retry). Use `eventId` to deduplicate.
+
+**Verify the signature first.** Before any business logic, verify `X-Rheo-Signature` using the raw request body bytes.
+
+**Keep an event log.** Store received events in your database before acting on them. This gives you a full audit trail and makes replay easy.
+
+---
+
+## Testing locally
+
+You can use a tunnelling tool like [ngrok](https://ngrok.com) or [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) to expose a local server during development.
+
+```bash
+# Start your local server on port 3000, then:
+ngrok http 3000
+
+# Copy the HTTPS URL (e.g. https://abc123.ngrok.io)
+# Set it as your webhook URL in the Rheo partner dashboard
+```
+
+Trigger a test by calling `PUT /integration/v1/items/TEST_001` with `autoPublishTradera: false` and then using `PATCH /status` to set it to `sold`.

@@ -1,0 +1,201 @@
+---
+title: Endpoints
+description: Full reference for all Integration API endpoints.
+sidebar:
+  order: 4
+---
+
+## Base URL
+
+```
+https://market.rheo.se
+```
+
+All endpoints require `x-api-key` authentication. See [Authentication](/integration/authentication/).
+
+---
+
+## PUT /integration/v1/items/:external_id
+
+Create or update an item. This endpoint is **idempotent** — calling it with the same `external_id` a second time updates the existing item rather than creating a duplicate.
+
+### Parameters
+
+| Name | In | Type | Required | Description |
+|---|---|---|---|---|
+| `external_id` | path | string | Yes | Your internal item ID. Max 255 characters. |
+
+### Request body
+
+```json
+{
+  "title": "Volvo XC90 bromsok fram vänster",
+  "description": "Testad och fungerande. Skick B.",
+  "price": 950,
+  "shippingCost": 149,
+  "weightKg": 3.2,
+  "currency": "SEK",
+  "imageUrls": [
+    "https://your-cdn.example.com/parts/12345/1.jpg"
+  ],
+  "domain": {
+    "domain": "automotive_part",
+    "oemCode": "31400452",
+    "manufacturer": "Volvo",
+    "compatibleModels": ["XC90", "XC90 II"],
+    "donorVehicleYear": 2018,
+    "conditionGrade": "B"
+  },
+  "autoPublishTradera": true,
+  "useAiEnhancement": false
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `title` | string | Yes | Item title. Max 255 characters. |
+| `description` | string | No | Plain text description. |
+| `price` | number | Yes | Starting price in SEK. Minimum 1. |
+| `shippingCost` | number | Yes | Flat shipping cost in SEK. Use `0` for free shipping. |
+| `weightKg` | number | No | Item weight. Used for shipping calculations. |
+| `currency` | string | No | Defaults to `SEK`. |
+| `imageUrls` | string[] | Yes | HTTPS URLs to item images. Max 10. Images are downloaded and hosted by Rheo. |
+| `domain` | object | No | Domain-specific attributes. See [Field Reference](/integration/fields/). |
+| `autoPublishTradera` | boolean | No | If `true`, automatically publishes a Tradera auction when images are ready. Default: `false`. |
+| `useAiEnhancement` | boolean | No | If `true`, runs the item through Rheo's AI to improve title and description. Default: `false`. |
+
+### Response
+
+```json
+{
+  "success": true,
+  "itemId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "message": "Item is being processed in the background."
+}
+```
+
+`202 Accepted` — the item is queued. Processing completes within 30 seconds. Use `GET` to poll status or configure a webhook for push notification.
+
+---
+
+## GET /integration/v1/items/:external_id
+
+Returns the current status of an item.
+
+### Response
+
+```json
+{
+  "externalId": "ERP_PART_12345",
+  "rheoItemId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "rheoStatus": "active",
+  "traderaStatus": "active",
+  "traderaAdId": "398271634",
+  "traderaAdUrl": "https://www.tradera.com/item/398271634",
+  "price": 950
+}
+```
+
+| Field | Description |
+|---|---|
+| `rheoStatus` | `draft`, `active`, `sold`, `not_listed`, or `archived` |
+| `traderaStatus` | `active`, `sold`, `ended`, `pending_sync`, or `sync_error` |
+| `traderaAdId` | Tradera's internal ad ID. `null` if not yet published. |
+| `traderaAdUrl` | Direct link to the live ad. `null` if not yet published or if `traderaAdId` starts with `pending`. |
+
+---
+
+## PATCH /integration/v1/items/:external_id/price
+
+Updates the price of an active item. If the item has an active Tradera auction, the auction price is updated immediately.
+
+:::caution
+Tradera rejects price updates if the auction already has bids. You will receive a `listing.failed` webhook in that case.
+:::
+
+### Request body
+
+```json
+{ "price": 795 }
+```
+
+**Response:** `202 Accepted`
+
+---
+
+## PATCH /integration/v1/items/:external_id/status
+
+Updates item status. Use this to de-list an item (e.g. sold in your own store) or mark it as sold.
+
+### Request body
+
+```json
+{ "status": "not_listed" }
+```
+
+| Value | Effect |
+|---|---|
+| `not_listed` | Removes the Tradera auction and de-lists from Rheo. |
+| `sold` | Marks as sold in Rheo and removes the Tradera auction. |
+
+**Response:** `202 Accepted`
+
+---
+
+## DELETE /integration/v1/items/:external_id
+
+Removes an item. If the item has an active Tradera auction, the auction is taken down first.
+
+Items linked to an in-progress Rheo order are archived rather than deleted (to preserve the order record).
+
+**Response:** `202 Accepted`
+
+---
+
+## POST /integration/api-keys/generate
+
+Generates a new API key.
+
+Requires JWT authentication (partner dashboard session), not an API key.
+
+### Request body
+
+```json
+{ "name": "Recopart Production" }
+```
+
+### Response
+
+```json
+{
+  "apiKey": "rheo_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "name": "Recopart Production"
+}
+```
+
+The `apiKey` value is shown **once**. It cannot be retrieved again.
+
+---
+
+## GET /integration/webhook-deliveries
+
+Returns the 100 most recent webhook delivery attempts for your account, newest first.
+
+Requires JWT authentication (partner dashboard session).
+
+### Response
+
+```json
+{
+  "deliveries": [
+    {
+      "id": "...",
+      "externalId": "ERP_PART_12345",
+      "eventType": "listing.created",
+      "status": "success",
+      "errorMessage": null,
+      "createdAt": "2026-05-26T10:00:00Z"
+    }
+  ]
+}
+```

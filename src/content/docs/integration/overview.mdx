@@ -1,0 +1,65 @@
+---
+title: Overview
+description: How the Rheo Integration API works end to end.
+sidebar:
+  order: 1
+---
+
+## Architecture
+
+The Rheo Integration API is a REST API secured with per-partner API keys. You push items to Rheo; Rheo handles Tradera publishing, monitoring, and sale reconciliation.
+
+```
+Your ERP / system
+       |
+       | PUT /integration/v1/items/:external_id
+       v
+  Rheo API (market.rheo.se)
+       |
+       | Background job (< 30 s)
+       v
+  Tradera auction created
+       |
+       | Sync every 15 min
+       v
+  Status change detected
+       |
+       | Signed webhook POST
+       v
+  Your webhook endpoint
+```
+
+## Item lifecycle
+
+| State | Meaning |
+|---|---|
+| `draft` | Received by Rheo, images not yet downloaded |
+| `active` | Images processed, item live in Rheo marketplace |
+| `active` + Tradera ad | Tradera auction running |
+| `sold` | Sold on Tradera or Rheo. `item.sold` webhook fired. |
+| `not_listed` | Manually de-listed or `status` PATCH set to `not_listed` |
+| `archived` | Deleted while a Rheo order was in progress |
+
+## Webhook events
+
+| Event | Fired when |
+|---|---|
+| `listing.created` | Tradera auction went live |
+| `listing.ended` | Tradera auction closed without a sale |
+| `listing.failed` | Tradera publish failed (expired token, API error) |
+| `item.sold` | Item sold on Tradera |
+
+## Rate limits
+
+| Tier | Limit |
+|---|---|
+| Item sync (`PUT`) | 10 req/s per API key |
+| Price update (`PATCH /price`) | 20 req/s per API key |
+| Status update (`PATCH /status`) | 20 req/s per API key |
+| Read (`GET`) | 30 req/s per API key |
+
+Exceeding limits returns `429 Too Many Requests`. Implement exponential backoff with an initial delay of 1 s.
+
+## Sync strategy
+
+For large initial imports (10,000+ items), spread requests over several minutes rather than bursting. A safe starting point is 5 req/s with a 200 ms delay between batches.

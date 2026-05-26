@@ -1,0 +1,111 @@
+---
+title: Field Reference
+description: Domain fields for automotive parts and other item types.
+sidebar:
+  order: 6
+---
+
+## Domain object
+
+The `domain` field carries item-type-specific attributes. It uses a tagged union — the `domain` property inside the object determines the type.
+
+---
+
+## Automotive parts
+
+Use `"domain": "automotive_part"` for spare parts, body panels, engines, gearboxes, etc.
+
+```json
+{
+  "domain": {
+    "domain": "automotive_part",
+    "oemCode": "31400452",
+    "manufacturer": "Volvo",
+    "compatibleModels": ["XC90", "XC90 II"],
+    "donorVehicleYear": 2018,
+    "conditionGrade": "B"
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `oemCode` | string | OEM part number. Required for automotive parts. Shown in the Tradera ad. |
+| `manufacturer` | string | Vehicle manufacturer (e.g. `Volvo`, `BMW`, `Scania`). |
+| `compatibleModels` | string[] | List of compatible model names. |
+| `donorVehicleYear` | integer | Model year of the donor vehicle. |
+| `conditionGrade` | string | Condition rating. Rheo accepts any string; recommended values below. |
+
+### Condition grades
+
+| Grade | Meaning |
+|---|---|
+| `A*` | New old stock or unused |
+| `A` | Excellent — minimal wear, fully functional |
+| `B` | Good — normal wear, fully functional |
+| `C` | Fair — visible wear or minor damage, functional |
+
+These grades are displayed verbatim in the Tradera ad description.
+
+---
+
+## Electronics
+
+```json
+{
+  "domain": {
+    "domain": "electronics",
+    "serialNumber": "SN123456",
+    "memoryGb": 256,
+    "batteryHealthPercentage": 88
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `serialNumber` | string | Device serial number. |
+| `memoryGb` | integer | Storage capacity in GB. |
+| `batteryHealthPercentage` | integer | Battery health (0–100). |
+
+---
+
+## Fashion
+
+```json
+{
+  "domain": {
+    "domain": "fashion",
+    "size": "M",
+    "material": "Cotton",
+    "gender": "unisex"
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `size` | string | Size label (e.g. `M`, `42`, `UK 8`). |
+| `material` | string | Primary material. |
+| `gender` | string | `mens`, `womens`, or `unisex`. |
+
+---
+
+## Generic items
+
+Omit the `domain` field entirely, or use `"domain": "generic"`, for items that do not fit the above categories.
+
+---
+
+## How domain data appears in Tradera ads
+
+Rheo appends a structured section at the end of the Tradera ad description:
+
+```
+--- Technical Specification ---
+OEM: 31400452
+Condition: B
+Compatible with: Volvo XC90 (2018)
+```
+
+This section is generated automatically from the `domain` fields you provide. The higher the quality of the data you send, the better the ad performs in Tradera search.

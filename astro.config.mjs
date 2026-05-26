@@ -1,0 +1,35 @@
+import { defineConfig } from 'astro/config';
+import starlight from '@astrojs/starlight';
+
+export default defineConfig({
+  integrations: [
+    starlight({
+      title: 'Rheo Docs',
+      description: 'Official documentation for the Rheo Integration API',
+      social: {
+        github: 'https://github.com/Rheo-App',
+      },
+      sidebar: [
+        {
+          label: 'Integration API',
+          items: [
+            { label: 'Overview', link: '/integration/overview/' },
+            { label: 'Quick Start', link: '/integration/quickstart/' },
+            { label: 'Authentication', link: '/integration/authentication/' },
+            { label: 'Endpoints', link: '/integration/endpoints/' },
+            { label: 'Webhooks', link: '/integration/webhooks/' },
+            { label: 'Field Reference', link: '/integration/fields/' },
+            { label: 'Errors', link: '/integration/errors/' },
+          ],
+        },
+      ],
+      customCss: ['./src/styles/custom.css'],
+      head: [
+        {
+          tag: 'link',
+          attrs: { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
+        },
+      ],
+    }),
+  ],
+});

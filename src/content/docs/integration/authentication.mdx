@@ -1,0 +1,121 @@
+---
+title: Authentication
+description: How to authenticate API calls and verify webhook signatures.
+sidebar:
+  order: 3
+---
+
+## API key authentication
+
+All Integration API endpoints require an `x-api-key` header.
+
+```http
+PUT https://market.rheo.se/integration/v1/items/PART_001
+x-api-key: rheo_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+API keys are generated in the Rheo partner dashboard under **Integration → API Keys**. Each key is shown **once** at generation time — store it in your secrets manager immediately.
+
+### Key format
+
+```
+rheo_live_<32 random alphanumeric characters>
+```
+
+Keys are stored as SHA-256 hashes in the Rheo database. A compromised key can be revoked instantly from the dashboard without affecting other keys.
+
+### Key rotation
+
+You can generate multiple keys simultaneously (e.g. one per environment). To rotate:
+
+1. Generate a new key.
+2. Update your system to use the new key.
+3. Revoke the old key from the dashboard.
+
+There is no downtime during rotation.
+
+---
+
+## Webhook signature verification
+
+Every webhook Rheo delivers includes an `X-Rheo-Signature` header:
+
+```
+X-Rheo-Signature: sha256=a4b2c9...
+```
+
+The signature is `HMAC-SHA256` of the **raw request body** using your webhook secret as the key.
+
+**Always verify this signature before processing a webhook.** Without verification, anyone who knows your endpoint URL can send fake `item.sold` events.
+
+Your webhook secret is available in the partner dashboard under **Integration → Webhook Settings**. It begins with `whsec_`.
+
+### Verification examples
+
+```csharp
+// C# (.NET)
+using System.Security.Cryptography;
+using System.Text;
+
+bool VerifyWebhookSignature(string rawBody, string signatureHeader, string secret)
+{
+    if (!signatureHeader.StartsWith("sha256=")) return false;
+    var expected = signatureHeader["sha256=".Length..];
+
+    using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+    var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(rawBody));
+    var computed = Convert.ToHexString(hash).ToLower();
+
+    return CryptographicOperations.FixedTimeEquals(
+        Encoding.UTF8.GetBytes(computed),
+        Encoding.UTF8.GetBytes(expected)
+    );
+}
+```
+
+```typescript
+// TypeScript / Node.js
+import { createHmac, timingSafeEqual } from 'crypto';
+
+function verifyWebhookSignature(
+  rawBody: string,
+  signatureHeader: string,
+  secret: string
+): boolean {
+  if (!signatureHeader.startsWith('sha256=')) return false;
+  const expected = signatureHeader.slice('sha256='.length);
+
+  const computed = createHmac('sha256', secret)
+    .update(rawBody)
+    .digest('hex');
+
+  return timingSafeEqual(Buffer.from(computed), Buffer.from(expected));
+}
+```
+
+```python
+# Python
+import hmac
+import hashlib
+
+def verify_webhook_signature(raw_body: bytes, signature_header: str, secret: str) -> bool:
+    if not signature_header.startswith("sha256="):
+        return False
+    expected = signature_header[len("sha256="):]
+    computed = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(computed, expected)
+```
+
+### Rotating the webhook secret
+
+If your secret is compromised, rotate it from the dashboard (**Integration → Webhook Settings → Rotate Secret**). All webhooks sent after rotation use the new secret. Update your system before rotating to avoid a verification gap.
+
+---
+
+## Security checklist
+
+- Store your API key and webhook secret in a secrets manager, never in source code.
+- Always verify `X-Rheo-Signature` before processing a webhook.
+- Use a timing-safe comparison (`FixedTimeEquals`, `timingSafeEqual`, `hmac.compare_digest`).
+- Read the raw request body for HMAC verification — do not re-serialize a parsed JSON object.
+- Reject webhooks without a valid signature with `401 Unauthorized`.
