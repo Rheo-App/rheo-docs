@@ -29,6 +29,17 @@ export default defineConfig({
           tag: 'link',
           attrs: { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
         },
+        {
+          tag: 'script',
+          content: `
+            (function() {
+              var stored = localStorage.getItem('starlight-theme');
+              if (!stored) {
+                document.documentElement.setAttribute('data-theme', 'light');
+              }
+            })();
+          `,
+        },
       ],
     }),
   ],
