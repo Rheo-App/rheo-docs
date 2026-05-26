@@ -9,6 +9,9 @@ export default defineConfig({
       social: {
         github: 'https://github.com/Rheo-App',
       },
+      expressiveCode: {
+        themes: ['github-dark', 'github-light'],
+      },
       sidebar: [
         {
           label: 'Integration API',
@@ -20,6 +23,8 @@ export default defineConfig({
             { label: 'Webhooks', link: '/integration/webhooks/' },
             { label: 'Field Reference', link: '/integration/fields/' },
             { label: 'Errors', link: '/integration/errors/' },
+            { label: 'Management API', link: '/integration/management/' },
+            { label: 'Partner Analytics', link: '/integration/partner/' },
           ],
         },
       ],

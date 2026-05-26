@@ -120,13 +120,15 @@ header.header {
 }
 
 /* ─── Code blocks ────────────────────────────────────────────────────────── */
-:root[data-theme='light'] .expressive-code .frame {
-  background-color: hsl(0, 0%, 96%) !important;
-  border: 1px solid hsl(0, 0%, 89%) !important;
-  box-shadow: none !important;
+/* Expressive Code reads --sl-color-gray-6 (dark) and --sl-color-gray-7 (light)
+   for code block backgrounds — set those variables instead of fighting with !important. */
+:root[data-theme='light'] {
+  --sl-color-gray-7: hsl(0, 0%, 96%);
 }
-:root[data-theme='light'] .expressive-code .frame pre {
-  background-color: hsl(0, 0%, 96%) !important;
+
+:root[data-theme='light'] .expressive-code .frame {
+  border: 1px solid hsl(0, 0%, 89%);
+  box-shadow: none;
 }
 
 /* Inline code */
