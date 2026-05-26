@@ -10,7 +10,7 @@ export default defineConfig({
         github: 'https://github.com/Rheo-App',
       },
       expressiveCode: {
-        themes: ['github-dark', 'github-light'],
+        themes: ['one-dark-pro', 'github-light'],
       },
       sidebar: [
         {
