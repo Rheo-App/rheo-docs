@@ -5,9 +5,23 @@ sidebar:
   order: 3
 ---
 
+## Two authentication methods
+
+The Rheo API uses two distinct authentication schemes depending on the endpoint type.
+
+| Endpoint group | Auth method | Header |
+|---|---|---|
+| Item sync (`/integration/v1/items/*`) | API key | `x-api-key: rheo_live_...` |
+| Management (API keys, webhook settings) | Supabase JWT | `Authorization: Bearer <token>` |
+| Partner analytics / subscription | Supabase JWT | `Authorization: Bearer <token>` |
+
+**Use API key auth in your server-side integration code.** Supabase JWT auth is for the partner dashboard UI — tokens are short-lived and user-scoped.
+
+---
+
 ## API key authentication
 
-All Integration API endpoints require an `x-api-key` header.
+Item sync endpoints require an `x-api-key` header.
 
 ```http
 PUT https://market.rheo.se/integration/v1/items/PART_001

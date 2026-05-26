@@ -59,9 +59,9 @@ Create or update an item. This endpoint is **idempotent** — calling it with th
 | `shippingCost` | number | Yes | Flat shipping cost in SEK. Use `0` for free shipping. |
 | `weightKg` | number | No | Item weight. Used for shipping calculations. |
 | `currency` | string | No | Defaults to `SEK`. |
-| `imageUrls` | string[] | Yes | HTTPS URLs to item images. Max 10. Images are downloaded and hosted by Rheo. |
+| `imageUrls` | string[] | Yes | HTTPS URLs to item images. Max 10. Images are downloaded and hosted by Rheo. Also accepted as `images` or `image_urls`. |
 | `domain` | object | No | Domain-specific attributes. See [Field Reference](/integration/fields/). |
-| `autoPublishTradera` | boolean | No | If `true`, automatically publishes a Tradera auction when images are ready. Default: `false`. |
+| `autoPublishTradera` | boolean | No | If `true`, automatically publishes a Tradera auction when images are ready. **Only applied when creating a new item.** Updates to existing items do not trigger a new Tradera listing. Default: `false`. |
 | `useAiEnhancement` | boolean | No | If `true`, runs the item through Rheo's AI to improve title and description. Default: `false`. |
 
 ### Response
@@ -74,7 +74,7 @@ Create or update an item. This endpoint is **idempotent** — calling it with th
 }
 ```
 
-`202 Accepted` — the item is queued. Processing completes within 30 seconds. Use `GET` to poll status or configure a webhook for push notification.
+`202 Accepted` — the item is queued. For new items, image download and Tradera publishing complete within ~30 seconds. For updates to existing items, the response arrives immediately and the `message` field reflects whether it was a create or update. Use `GET` to poll status or configure a webhook for push notification.
 
 ---
 
@@ -107,10 +107,10 @@ Returns the current status of an item.
 
 ## PATCH /integration/v1/items/:external_id/price
 
-Updates the price of an active item. If the item has an active Tradera auction, the auction price is updated immediately.
+Updates the price of an active item. The database is updated immediately and a background job propagates the change to Tradera.
 
 :::caution
-Tradera rejects price updates if the auction already has bids. You will receive a `listing.failed` webhook in that case.
+Tradera rejects price updates if the auction already has bids. You will receive a `listing.failed` webhook in that case. The item price in Rheo is still updated even if the Tradera propagation fails.
 :::
 
 ### Request body
@@ -118,6 +118,10 @@ Tradera rejects price updates if the auction already has bids. You will receive 
 ```json
 { "price": 795 }
 ```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `price` | number | Yes | New price in SEK. Minimum 1. |
 
 **Response:** `202 Accepted`
 
@@ -152,50 +156,5 @@ Items linked to an in-progress Rheo order are archived rather than deleted (to p
 
 ---
 
-## POST /integration/api-keys/generate
-
-Generates a new API key.
-
-Requires JWT authentication (partner dashboard session), not an API key.
-
-### Request body
-
-```json
-{ "name": "Recopart Production" }
-```
-
-### Response
-
-```json
-{
-  "apiKey": "rheo_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-  "name": "Recopart Production"
-}
-```
-
-The `apiKey` value is shown **once**. It cannot be retrieved again.
-
----
-
-## GET /integration/webhook-deliveries
-
-Returns the 100 most recent webhook delivery attempts for your account, newest first.
-
-Requires JWT authentication (partner dashboard session).
-
-### Response
-
-```json
-{
-  "deliveries": [
-    {
-      "id": "...",
-      "externalId": "ERP_PART_12345",
-      "eventType": "listing.created",
-      "status": "success",
-      "errorMessage": null,
-      "createdAt": "2026-05-26T10:00:00Z"
-    }
-  ]
-}
+For API key management, webhook settings, and the delivery log, see the [Management API](/integration/management/) reference. Those endpoints require JWT authentication (partner dashboard session) rather than an API key.
 ```

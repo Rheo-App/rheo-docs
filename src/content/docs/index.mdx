@@ -30,7 +30,8 @@ The Rheo Integration API lets B2B partners — demolition plants, parts dealers,
 | Concept | Description |
 |---|---|
 | `external_id` | Your internal item ID (e.g. ERP part number). Used in all API calls. Rheo never changes it. |
-| `x-api-key` | Authentication header. Generated in the Rheo partner dashboard. |
+| `x-api-key` | Authentication header for item sync. Generated in the Rheo partner dashboard. |
+| JWT | Supabase session token. Required for [management](/integration/management/) and [analytics](/integration/partner/) endpoints. |
 | Webhook | Signed HTTP POST Rheo sends to your endpoint on listing events. |
 | `X-Rheo-Signature` | HMAC-SHA256 header on every webhook. Verify it before processing. |
 

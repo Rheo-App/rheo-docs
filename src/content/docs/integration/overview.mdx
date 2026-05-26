@@ -63,3 +63,16 @@ Exceeding limits returns `429 Too Many Requests`. Implement exponential backoff 
 ## Sync strategy
 
 For large initial imports (10,000+ items), spread requests over several minutes rather than bursting. A safe starting point is 5 req/s with a 200 ms delay between batches.
+
+## Management and analytics
+
+The Rheo partner dashboard exposes additional endpoints for account management and reporting. These use Supabase JWT authentication rather than an API key.
+
+| Endpoint group | Purpose |
+|---|---|
+| [Management API](/integration/management/) | API key CRUD, webhook URL configuration, secret rotation, delivery log |
+| [Partner Analytics API](/integration/partner/) | Inventory counts, monthly revenue, category breakdown, subscription management |
+
+## Background job delivery guarantees
+
+All mutating endpoints (`PUT`, `PATCH`, `DELETE`) return `202 Accepted` immediately and enqueue a background job. Jobs use at-least-once delivery with up to 3 retry attempts. Critical jobs (image download, Tradera publish) retry on failure before emitting a `listing.failed` webhook.

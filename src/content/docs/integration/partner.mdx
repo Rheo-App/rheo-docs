@@ -1,0 +1,154 @@
+---
+title: Partner Analytics API
+description: Endpoints for inventory counts, revenue reporting, and subscription management.
+sidebar:
+  order: 9
+---
+
+All endpoints on this page require **JWT authentication** (a Supabase session from the Rheo partner dashboard).
+
+---
+
+## Analytics
+
+### GET /partner/analytics
+
+Returns a full analytics snapshot for the authenticated partner: inventory counts, monthly revenue for the past 12 months, a category breakdown, and a revenue summary.
+
+**Response** `200 OK`
+
+```json
+{
+  "inventory": {
+    "total": 843,
+    "active": 512,
+    "draft": 120,
+    "sold": 198,
+    "archived": 13
+  },
+  "monthlyRevenue": [
+    {
+      "month": "2026-04",
+      "gross": 48500.0,
+      "fee": 4850.0,
+      "net": 43650.0,
+      "orders": 32
+    }
+  ],
+  "categoryBreakdown": [
+    {
+      "category": "Reservdel",
+      "count": 640,
+      "revenue": 81200.0
+    }
+  ],
+  "revenueSummary": {
+    "totalGross": 421000.0,
+    "totalFee": 42100.0,
+    "totalNet": 378900.0,
+    "totalPending": 12400.0
+  }
+}
+```
+
+#### inventory
+
+| Field | Description |
+|---|---|
+| `total` | All items across all statuses |
+| `active` | Currently live on Rheo or Tradera |
+| `draft` | Received by Rheo but not yet published (images pending, etc.) |
+| `sold` | Completed sales |
+| `archived` | Deleted while linked to an active order |
+
+#### monthlyRevenue
+
+Up to 12 entries, one per calendar month. Months with no sales are included with zeroes.
+
+| Field | Description |
+|---|---|
+| `month` | `YYYY-MM` string |
+| `gross` | Total sale price across all orders in SEK |
+| `fee` | Rheo platform fee deducted from gross in SEK |
+| `net` | `gross - fee` in SEK |
+| `orders` | Number of completed orders |
+
+#### categoryBreakdown
+
+Up to 10 categories ordered by revenue descending. Category names are derived from the item's `domain` field at push time: `automotive_part` → `"Reservdel"`, `electronics` → `"Elektronik"`, `fashion` → `"Kläder"`, other → `"Övrigt"`.
+
+#### revenueSummary
+
+Aggregated totals across all time.
+
+| Field | Description |
+|---|---|
+| `totalGross` | Sum of all completed order amounts in SEK |
+| `totalFee` | Sum of all platform fees in SEK |
+| `totalNet` | `totalGross - totalFee` |
+| `totalPending` | Amount from orders in progress (not yet paid or completed) in SEK |
+
+---
+
+## Subscription
+
+### GET /partner/subscription
+
+Returns the current subscription tier for the authenticated partner.
+
+**Response** `200 OK`
+
+```json
+{
+  "tier": "pro",
+  "isPro": true,
+  "subscribedAt": "2026-04-01T00:00:00Z",
+  "expiresAt": "2026-07-01T00:00:00Z"
+}
+```
+
+| Field | Description |
+|---|---|
+| `tier` | `"free"` or `"pro"` |
+| `isPro` | `true` only when tier is `pro` AND the subscription has not expired |
+| `subscribedAt` | ISO 8601 timestamp. `null` if never subscribed. |
+| `expiresAt` | ISO 8601 timestamp. `null` if no active subscription. |
+
+Partners on the free tier have `isPro: false` and both timestamp fields as `null`.
+
+---
+
+### POST /partner/subscription/checkout
+
+Creates a Stripe Checkout session for upgrading to the **Rheo Partner Pro** plan and returns the redirect URL.
+
+The Pro plan is billed monthly at **199 SEK/month** via Stripe.
+
+**Request body** — none required.
+
+**Response** `200 OK`
+
+```json
+{
+  "url": "https://checkout.stripe.com/c/pay/..."
+}
+```
+
+Redirect the user to `url`. On successful payment, Stripe redirects back to the partner dashboard with `?upgraded=true`. On cancellation, the user is returned to the dashboard without the query parameter.
+
+:::note
+The checkout session is single-use and expires after 24 hours. Generate a new one if the user needs to retry.
+:::
+
+---
+
+## Subscription tiers
+
+| Feature | Free | Pro |
+|---|---|---|
+| Item sync (PUT) | Included | Included |
+| Tradera auto-publish | Included | Included |
+| Webhooks | Included | Included |
+| Partner analytics | Dashboard view | Dashboard view |
+| Priority support | — | Included |
+| Monthly price | 0 SEK | 199 SEK/month |

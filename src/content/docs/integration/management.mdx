@@ -1,0 +1,191 @@
+---
+title: Management API
+description: Dashboard endpoints for managing API keys, webhook settings, and delivery logs.
+sidebar:
+  order: 8
+---
+
+All endpoints on this page require **JWT authentication** (a valid Supabase session from the Rheo partner dashboard). They are intended for use by the dashboard UI, not by your server-side integration code. Use the `x-api-key` header only for item sync endpoints — see [Authentication](/integration/authentication/).
+
+---
+
+## API Key Management
+
+### POST /integration/api-keys/generate
+
+Creates a new API key for the authenticated partner account.
+
+The raw key is returned **once** and cannot be retrieved again. Store it immediately in a secrets manager.
+
+**Request body** (all fields optional)
+
+```json
+{ "name": "Recopart Production" }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Human-readable label. Defaults to `"API Key"` if omitted. |
+
+**Response** `200 OK`
+
+```json
+{
+  "apiKey": "rheo_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "name": "Recopart Production"
+}
+```
+
+---
+
+### GET /integration/api-keys
+
+Lists all active (non-revoked) API keys for the account.
+
+**Response** `200 OK`
+
+```json
+{
+  "keys": [
+    {
+      "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "userId": "...",
+      "prefix": "rheo_live_a1b2",
+      "name": "Recopart Production",
+      "createdAt": "2026-05-01T10:00:00Z",
+      "lastUsedAt": "2026-05-26T08:44:00Z",
+      "revokedAt": null
+    }
+  ]
+}
+```
+
+| Field | Description |
+|---|---|
+| `id` | UUID of the key record. Use this to revoke the key. |
+| `prefix` | First 4 characters of the raw key (safe to display). |
+| `lastUsedAt` | When the key was last used to authenticate a request. `null` if never used. |
+| `revokedAt` | Always `null` in this response (revoked keys are excluded). |
+
+---
+
+### DELETE /integration/api-keys/:id
+
+Revokes an API key immediately. Any in-flight request using the key will fail after revocation.
+
+```http
+DELETE https://market.rheo.se/integration/api-keys/f47ac10b-58cc-4372-a567-0e02b2c3d479
+Authorization: Bearer <supabase-jwt>
+```
+
+**Response** `204 No Content`
+
+Returns `404 Not Found` if the key does not exist or belongs to a different account.
+
+---
+
+## Webhook Settings
+
+### GET /integration/webhook-settings
+
+Returns the current webhook URL and signing secret for the account.
+
+If no signing secret exists yet (new accounts), one is generated automatically and stored.
+
+**Response** `200 OK`
+
+```json
+{
+  "webhookUrl": "https://your-system.example.com/rheo-webhook",
+  "webhookSecret": "whsec_aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890ab"
+}
+```
+
+| Field | Description |
+|---|---|
+| `webhookUrl` | The URL Rheo sends webhook `POST` requests to. `null` if not configured. |
+| `webhookSecret` | HMAC-SHA256 signing secret. Use this to verify `X-Rheo-Signature`. Starts with `whsec_`. |
+
+---
+
+### PUT /integration/webhook-settings
+
+Updates the webhook destination URL.
+
+**Request body**
+
+```json
+{ "webhookUrl": "https://your-system.example.com/rheo-webhook" }
+```
+
+Set `webhookUrl` to `null` to remove the webhook URL.
+
+**Response** `200 OK`
+
+```json
+{ "success": true }
+```
+
+---
+
+### POST /integration/webhook-settings/rotate-secret
+
+Generates a new webhook signing secret and immediately invalidates the previous one.
+
+:::caution
+After rotation, all webhooks use the new secret. Update your verification logic **before** rotating to avoid dropping events during the transition.
+:::
+
+**Response** `200 OK`
+
+```json
+{
+  "webhookUrl": "https://your-system.example.com/rheo-webhook",
+  "webhookSecret": "whsec_newSecretHere"
+}
+```
+
+The response includes the full new secret — this is the only time the new value is returned in plaintext.
+
+---
+
+## Webhook Delivery Log
+
+### GET /integration/webhook-deliveries
+
+Returns the 100 most recent webhook delivery attempts for the account, newest first.
+
+Useful for debugging failed deliveries or confirming that events are being received.
+
+**Response** `200 OK`
+
+```json
+{
+  "deliveries": [
+    {
+      "id": "9b1d4f83-...",
+      "externalId": "ERP_PART_12345",
+      "eventType": "item.sold",
+      "status": "success",
+      "errorMessage": null,
+      "createdAt": "2026-05-26T14:32:00Z"
+    },
+    {
+      "id": "7e2a1c60-...",
+      "externalId": "ERP_PART_98765",
+      "eventType": "listing.failed",
+      "status": "failed",
+      "errorMessage": "Connection refused at https://your-system.example.com/rheo-webhook",
+      "createdAt": "2026-05-26T13:15:00Z"
+    }
+  ]
+}
+```
+
+| Field | Description |
+|---|---|
+| `status` | `success` or `failed` |
+| `errorMessage` | Network or HTTP error detail. `null` on success. |
+| `createdAt` | When the delivery was attempted. |
+
+Retries are logged as separate delivery records, each with their own `status`.
