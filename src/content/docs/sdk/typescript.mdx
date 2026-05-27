@@ -67,11 +67,13 @@ const result = await rheo.items.upsert('ERP_PART_12345', {
     'https://cdn.example.com/parts/12345/2.jpg',
   ],
   domain: {
-    domain: 'automotive_part',
+    domain: 'auto_parts',
+    partName: 'Bromsok fram vänster',
     oemCode: '31400452',
     manufacturer: 'Volvo',
     compatibleModels: ['XC90'],
     donorVehicleYear: 2018,
+    vehicleType: 'Bil',
     conditionGrade: 'B',
   },
   autoPublishTradera: true,
@@ -135,9 +137,11 @@ const result = await rheo.items.batchUpsert({
     shippingCost: 149,
     imageUrls: part.photos.map((p) => p.url),
     domain: {
-      domain: 'automotive_part',
+      domain: 'auto_parts',
+      partName: part.name,
       oemCode: part.oemCode,
       manufacturer: 'Volvo',
+      vehicleType: 'Bil',
       conditionGrade: part.grade,
     },
     metadata: {
@@ -350,7 +354,7 @@ The SDK exports all types. Import them for use in your own type definitions.
 import type {
   RheoEvent,
   ItemSoldEvent,
-  DomainObjectAutomotivePart,
+  DomainObjectAutoParts,
   RheoItemStatus,
   BatchUpsertItem,
 } from 'rheo-sdk'
@@ -359,10 +363,10 @@ function handleSale(event: ItemSoldEvent) {
   // event.data.externalId, event.data.salePrice, event.data.platform
 }
 
-function isAutomotivePart(
+function isAutoPart(
   domain: DomainObject,
-): domain is DomainObjectAutomotivePart {
-  return domain.domain === 'automotive_part'
+): domain is DomainObjectAutoParts {
+  return domain.domain === 'auto_parts'
 }
 ```
 

@@ -13,16 +13,18 @@ The `domain` field carries item-type-specific attributes. It uses a tagged union
 
 ## Automotive parts
 
-Use `"domain": "automotive_part"` for spare parts, body panels, engines, gearboxes, etc.
+Use `"domain": "auto_parts"` for spare parts, body panels, engines, gearboxes, and parts from motorcycles, ATVs, snowmobiles, and caravans.
 
 ```json
 {
   "domain": {
-    "domain": "automotive_part",
+    "domain": "auto_parts",
     "oemCode": "31400452",
+    "partName": "Bromsok fram vänster",
     "manufacturer": "Volvo",
     "compatibleModels": ["XC90", "XC90 II"],
     "donorVehicleYear": 2018,
+    "vehicleType": "Bil",
     "conditionGrade": "B"
   }
 }
@@ -30,11 +32,25 @@ Use `"domain": "automotive_part"` for spare parts, body panels, engines, gearbox
 
 | Field | Type | Description |
 |---|---|---|
-| `oemCode` | string | OEM part number. Required for automotive parts. Shown in the Tradera ad. |
-| `manufacturer` | string | Vehicle manufacturer (e.g. `Volvo`, `BMW`, `Scania`). |
+| `oemCode` | string | OEM part number. Optional — `partName` alone is sufficient. Shown in the Tradera ad. |
+| `partName` | string | Human-readable part name (e.g. `"Bromsok fram vänster"`, `"Baklucka"`). |
+| `manufacturer` | string | Vehicle manufacturer (e.g. `Volvo`, `BMW`, `Kawasaki`). |
 | `compatibleModels` | string[] | List of compatible model names. |
 | `donorVehicleYear` | integer | Model year of the donor vehicle. |
+| `vehicleType` | string | Vehicle type the part came from. See values below. |
 | `conditionGrade` | string | Condition rating. Rheo accepts any string; recommended values below. |
+
+### Vehicle types
+
+| Value | Meaning |
+|---|---|
+| `Bil` | Passenger car (default if omitted) |
+| `MC` | Motorcycle |
+| `Skoter` | Snowmobile |
+| `ATV` | ATV / quad bike |
+| `Husvagn` | Caravan / trailer |
+| `Moped` | Moped |
+| `Traktor` | Tractor |
 
 ### Condition grades
 
@@ -91,9 +107,63 @@ These grades are displayed verbatim in the Tradera ad description.
 
 ---
 
+## Vehicles
+
+Use `"domain": "vehicles"` for whole vehicles being sold (cars, motorcycles, boats, caravans).
+
+```json
+{
+  "domain": {
+    "domain": "vehicles",
+    "registrationPlate": "ABC123",
+    "make": "Volvo",
+    "model": "XC90",
+    "year": 2018,
+    "mileageKm": 94000,
+    "fuelType": "diesel",
+    "color": "black"
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `registrationPlate` | string | Swedish registration plate. Rheo can auto-fill make/model/year from it via the plate lookup endpoint. |
+| `make` | string | Vehicle brand. |
+| `model` | string | Model name. |
+| `year` | integer | Model year. |
+| `mileageKm` | integer | Odometer reading in kilometres. |
+| `fuelType` | string | `petrol`, `diesel`, `electric`, or `hybrid`. |
+| `color` | string | Body colour. |
+
+---
+
+## Plate lookup
+
+Resolve a Swedish registration plate to vehicle metadata:
+
+```
+GET https://market.rheo.se/vehicles/lookup?plate=ABC123
+```
+
+```json
+{
+  "registrationPlate": "ABC123",
+  "make": "Volvo",
+  "model": "XC90",
+  "year": 2018,
+  "fuelType": "diesel",
+  "color": "black"
+}
+```
+
+Results are cached for 24 hours. Returns `404` if the plate is not found.
+
+---
+
 ## Generic items
 
-Omit the `domain` field entirely, or use `"domain": "generic"`, for items that do not fit the above categories.
+Omit the `domain` field entirely for items that do not fit the above categories.
 
 ---
 
@@ -108,4 +178,4 @@ Condition: B
 Compatible with: Volvo XC90 (2018)
 ```
 
-This section is generated automatically from the `domain` fields you provide. The higher the quality of the data you send, the better the ad performs in Tradera search.
+This section is generated automatically from the `domain` fields you provide. The more data you send, the better the ad performs in Tradera search.

@@ -79,12 +79,14 @@ var result = await rheo.Items.UpsertAsync("ERP_PART_12345", new UpsertItemReques
         "https://cdn.example.com/parts/12345/1.jpg",
         "https://cdn.example.com/parts/12345/2.jpg",
     ],
-    Domain = new AutomotivePartDomain
+    Domain = new AutoPartsDomain
     {
+        PartName = "Bromsok fram vänster",
         OemCode = "31400452",
         Manufacturer = "Volvo",
         CompatibleModels = ["XC90"],
         DonorVehicleYear = 2018,
+        VehicleType = "Bil",
         ConditionGrade = "B",
     },
     AutoPublishTradera = true,
@@ -143,10 +145,12 @@ var result = await rheo.Items.BatchUpsertAsync(new BatchUpsertRequest
         Price = p.AskingPrice,
         ShippingCost = 149,
         ImageUrls = p.Photos.Select(ph => ph.Url).ToList(),
-        Domain = new AutomotivePartDomain
+        Domain = new AutoPartsDomain
         {
+            PartName = p.Name,
             OemCode = p.OemCode,
             Manufacturer = "Volvo",
+            VehicleType = "Bil",
             ConditionGrade = p.Grade,
         },
         Metadata = new Dictionary<string, object?>
@@ -367,8 +371,8 @@ enum RheoItemType { Item, Container }
 
 // Domain objects
 abstract class DomainObject { }
-sealed class AutomotivePartDomain : DomainObject
-  { OemCode, Manufacturer, CompatibleModels, DonorVehicleYear, ConditionGrade }
+sealed class AutoPartsDomain : DomainObject
+  { PartName, OemCode, Manufacturer, CompatibleModels, DonorVehicleYear, VehicleType, ConditionGrade }
 sealed class ElectronicsDomain : DomainObject
   { Brand, Model, StorageGb, Condition }
 sealed class FashionDomain : DomainObject
