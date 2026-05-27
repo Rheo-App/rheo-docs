@@ -1,0 +1,393 @@
+---
+title: C# SDK
+description: Official .NET client for the Rheo integration API.
+sidebar:
+  order: 3
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+## Installation
+
+<Tabs>
+  <TabItem label=".NET CLI">
+    ```bash
+    dotnet add package Rheo.Sdk
+    ```
+  </TabItem>
+  <TabItem label="Package Manager">
+    ```
+    NuGet\Install-Package Rheo.Sdk
+    ```
+  </TabItem>
+  <TabItem label="PackageReference">
+    ```xml
+    <PackageReference Include="Rheo.Sdk" Version="0.1.*" />
+    ```
+  </TabItem>
+</Tabs>
+
+**Requires .NET 8 or later.**
+
+## Setup
+
+```csharp
+using Rheo.Sdk;
+
+var rheo = new RheoClient(new RheoClientOptions
+{
+    ApiKey = Environment.GetEnvironmentVariable("RHEO_API_KEY")!,
+    WebhookSecret = Environment.GetEnvironmentVariable("RHEO_WEBHOOK_SECRET"), // optional
+});
+```
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `ApiKey` | `string` | required | API key from the Rheo partner dashboard |
+| `WebhookSecret` | `string?` | `null` | `whsec_...` secret for webhook signature verification |
+| `BaseUrl` | `Uri` | `https://market.rheo.se` | Override for staging or self-hosted |
+| `Timeout` | `TimeSpan` | 30 s | Per-request timeout |
+| `MaxRetries` | `int` | `3` | Max retries on 429 / 5xx |
+| `PartnerAccount` | `string?` | `null` | Reseller member ID — scopes all item calls to that account |
+
+`RheoClient` implements `IDisposable`. In long-lived applications, register it as a singleton in your DI container.
+
+```csharp
+// ASP.NET Core DI
+builder.Services.AddSingleton(_ => new RheoClient(new RheoClientOptions
+{
+    ApiKey = builder.Configuration["Rheo:ApiKey"]!,
+    WebhookSecret = builder.Configuration["Rheo:WebhookSecret"],
+}));
+```
+
+---
+
+## Items
+
+### Push a single item
+
+```csharp
+var result = await rheo.Items.UpsertAsync("ERP_PART_12345", new UpsertItemRequest
+{
+    Title = "Volvo XC90 bromsok fram vänster — 2018",
+    Description = "Testad och fungerande. Skick B.",
+    Price = 950,
+    ShippingCost = 149,
+    WeightKg = 3.2,
+    ImageUrls = [
+        "https://cdn.example.com/parts/12345/1.jpg",
+        "https://cdn.example.com/parts/12345/2.jpg",
+    ],
+    Domain = new AutomotivePartDomain
+    {
+        OemCode = "31400452",
+        Manufacturer = "Volvo",
+        CompatibleModels = ["XC90"],
+        DonorVehicleYear = 2018,
+        ConditionGrade = "B",
+    },
+    AutoPublishTradera = true,
+    UseAiEnhancement = true,
+});
+// result.Success == true
+// result.ItemId  — Rheo's internal UUID
+```
+
+`UpsertAsync` creates or updates by external ID. Pass a `CancellationToken` as the final argument for request cancellation.
+
+### Get item status
+
+```csharp
+var item = await rheo.Items.GetAsync("ERP_PART_12345");
+// item.RheoStatus    — RheoItemStatus enum: Draft, Active, Sold, NotListed, Archived
+// item.TraderaAdUrl  — direct link to the live Tradera auction
+// item.Price         — current price in SEK
+```
+
+### Update price
+
+```csharp
+await rheo.Items.UpdatePriceAsync("ERP_PART_12345", new UpdatePriceRequest { Price = 850 });
+```
+
+### Update status
+
+```csharp
+await rheo.Items.UpdateStatusAsync("ERP_PART_12345", new UpdateStatusRequest { Status = "sold" });
+```
+
+### Delete
+
+```csharp
+await rheo.Items.DeleteAsync("ERP_PART_12345");
+```
+
+---
+
+## Batch operations
+
+Push up to 500 items in a single call.
+
+```csharp
+var parts = await dms.GetPartsForVehicleAsync("YV1CZ714581234567");
+
+var result = await rheo.Items.BatchUpsertAsync(new BatchUpsertRequest
+{
+    Items = parts.Select(p => new BatchUpsertItem
+    {
+        ExternalId = $"VIN-YV1CZ714581234567-{p.PartNumber}",
+        ParentExternalId = "VIN-YV1CZ714581234567",
+        Title = p.Name,
+        Description = p.Notes,
+        Price = p.AskingPrice,
+        ShippingCost = 149,
+        ImageUrls = p.Photos.Select(ph => ph.Url).ToList(),
+        Domain = new AutomotivePartDomain
+        {
+            OemCode = p.OemCode,
+            Manufacturer = "Volvo",
+            ConditionGrade = p.Grade,
+        },
+        Metadata = new Dictionary<string, object?>
+        {
+            ["locationBin"] = p.BinLocation,
+            ["dismantledBy"] = p.TechnicianId,
+        },
+        AutoPublishTradera = p.Grade != "C",
+    }).ToList(),
+});
+
+Console.WriteLine($"Accepted: {result.Accepted}, rejected: {result.Rejected}");
+foreach (var err in result.Errors)
+    Console.Error.WriteLine($"{err.ExternalId}: {err.Reason}");
+```
+
+---
+
+## Querying items
+
+```csharp
+// Active parts for a specific vehicle
+var page = await rheo.Items.ListAsync(new ListItemsParams
+{
+    ParentExternalId = "VIN-YV1CZ714581234567",
+    Status = RheoItemStatus.Active,
+    Limit = 100,
+});
+
+// Incremental sync — changes in last 24 hours
+var updated = await rheo.Items.ListAsync(new ListItemsParams
+{
+    UpdatedSince = DateTimeOffset.UtcNow.AddDays(-1),
+});
+
+// Cursor pagination
+string? cursor = null;
+do
+{
+    var p = await rheo.Items.ListAsync(new ListItemsParams { Limit = 100, Cursor = cursor });
+    // process p.Items ...
+    cursor = p.NextCursor;
+} while (cursor is not null);
+```
+
+### Container summary
+
+```csharp
+var summary = await rheo.Items.SummaryAsync("VIN-YV1CZ714581234567");
+Console.WriteLine($"Parts live: {summary.Children.ByStatus["active"]}");
+Console.WriteLine($"Revenue: {summary.Revenue.TotalSek:N0} SEK");
+```
+
+### Item history
+
+```csharp
+var history = await rheo.Items.HistoryAsync("ERP_PART_12345");
+foreach (var entry in history.History)
+    Console.WriteLine($"{entry.At} — {entry.Event}");
+```
+
+---
+
+## Vehicle hierarchy
+
+```csharp
+// Register the donor vehicle as a container
+await rheo.Items.UpsertAsync("VIN-YV1CZ714581234567", new UpsertItemRequest
+{
+    Type = RheoItemType.Container,
+    Title = "Volvo XC90 II 2018 — VIN YV1CZ714581234567",
+    Metadata = new Dictionary<string, object?>
+    {
+        ["vin"] = "YV1CZ714581234567",
+        ["make"] = "Volvo",
+        ["model"] = "XC90 II",
+        ["year"] = 2018,
+        ["receivedAt"] = DateTimeOffset.UtcNow.ToString("O"),
+    },
+});
+
+// Push all parts in one batch
+await rheo.Items.BatchUpsertAsync(new BatchUpsertRequest
+{
+    Items = parts.Select(p => new BatchUpsertItem
+    {
+        ExternalId = $"VIN-YV1CZ714581234567-{p.PartNumber}",
+        ParentExternalId = "VIN-YV1CZ714581234567",
+        Type = RheoItemType.Item,
+        // ...
+    }).ToList(),
+});
+```
+
+---
+
+## Webhooks
+
+### ASP.NET Core minimal API
+
+```csharp
+app.MapPost("/webhooks/rheo", async (HttpRequest request, RheoClient rheo) =>
+{
+    using var reader = new StreamReader(request.Body);
+    var rawBody = await reader.ReadToEndAsync();
+    var signature = request.Headers["X-Rheo-Signature"].ToString();
+
+    RheoEvent evt;
+    try
+    {
+        evt = rheo.Webhooks.Verify(rawBody, signature);
+    }
+    catch (RheoWebhookSignatureException)
+    {
+        return Results.Unauthorized();
+    }
+
+    switch (evt)
+    {
+        case ItemSoldEvent sold:
+            await dms.MarkPartSoldAsync(sold.ExternalId, sold.SalePrice);
+            break;
+        case ListingCreatedEvent listed:
+            await dms.RecordTraderaUrlAsync(listed.ExternalId, listed.PlatformAdUrl);
+            break;
+        case ListingFailedEvent failed:
+            await alerts.NotifyAsync($"Listing failed for {failed.ExternalId}: {failed.Reason}");
+            break;
+    }
+
+    return Results.Ok();
+});
+```
+
+### Classic controller
+
+```csharp
+[ApiController]
+[Route("webhooks")]
+public sealed class WebhooksController : ControllerBase
+{
+    private readonly RheoClient _rheo;
+
+    public WebhooksController(RheoClient rheo) => _rheo = rheo;
+
+    [HttpPost("rheo")]
+    public async Task<IActionResult> Receive()
+    {
+        using var reader = new StreamReader(Request.Body);
+        var rawBody = await reader.ReadToEndAsync();
+        var signature = Request.Headers["X-Rheo-Signature"].ToString();
+
+        RheoEvent evt;
+        try { evt = _rheo.Webhooks.Verify(rawBody, signature); }
+        catch (RheoWebhookSignatureException) { return Unauthorized(); }
+
+        // dispatch evt...
+        return Ok();
+    }
+}
+```
+
+**Read the raw request body before any JSON middleware parses it.** Pass the original bytes to `Verify()` — re-serializing a deserialized object will fail the HMAC check.
+
+---
+
+## Error handling
+
+```csharp
+using Rheo.Sdk.Exceptions;
+
+try
+{
+    await rheo.Items.UpsertAsync("PART_001", new UpsertItemRequest
+    {
+        Title = "Test part",
+        Price = 100,
+        ShippingCost = 50,
+    });
+}
+catch (RheoRateLimitException ex)
+{
+    var delay = ex.RetryAfter ?? TimeSpan.FromSeconds(5);
+    await Task.Delay(delay);
+    // retry...
+}
+catch (RheoApiException ex)
+{
+    logger.LogError("Rheo API error {Status}: {Message} (requestId: {RequestId})",
+        ex.Status, ex.Message, ex.RequestId);
+}
+```
+
+The SDK retries `429` and `5xx` responses automatically (up to `MaxRetries`). `RheoRateLimitException` is only thrown if retries are exhausted.
+
+---
+
+## Cancellation
+
+Every method accepts an optional `CancellationToken` as its last parameter.
+
+```csharp
+using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+var item = await rheo.Items.GetAsync("ERP_PART_12345", cts.Token);
+```
+
+---
+
+## Types reference
+
+```csharp
+// Item status enum
+enum RheoItemStatus { Draft, Active, Sold, NotListed, Archived }
+
+// Item type
+enum RheoItemType { Item, Container }
+
+// Domain objects
+abstract class DomainObject { }
+sealed class AutomotivePartDomain : DomainObject
+  { OemCode, Manufacturer, CompatibleModels, DonorVehicleYear, ConditionGrade }
+sealed class ElectronicsDomain : DomainObject
+  { Brand, Model, StorageGb, Condition }
+sealed class FashionDomain : DomainObject
+  { Brand, Size, Color, Condition }
+
+// Event types (use pattern matching)
+abstract class RheoEvent { Id, Timestamp, ApiVersion, Type }
+  ├── ItemCreatedEvent          { ExternalId }
+  ├── ItemImagesReadyEvent      { ExternalId, ImageCount }
+  ├── ItemAIPricedEvent         { ExternalId, AiPrice }
+  ├── ItemAIListedEvent         { ExternalId, Title, Description }
+  ├── ListingCreatedEvent       { ExternalId, Platform, PlatformAdId, PlatformAdUrl }
+  ├── ListingEndedEvent         { ExternalId, Platform }
+  ├── ListingFailedEvent        { ExternalId, Platform, Reason }
+  ├── ItemSoldEvent             { ExternalId, SalePrice, Platform, BuyerCountry }
+  ├── ItemStatusChangedEvent    { ExternalId, FromStatus, ToStatus }
+  ├── WorkflowApprovalPending   { RunId, WorkflowId, NodeId, Prompt, SubjectExternalId }
+  ├── WorkflowStepCompleted     { RunId, WorkflowId, NodeId, SubjectExternalId }
+  └── WorkflowRunCompleted      { RunId, WorkflowId, Status, SubjectExternalId }
+```
+
+`RheoEvent` uses `[JsonPolymorphic]` — deserialize using the SDK's built-in `Webhooks.Verify()` or `Webhooks.ParseEvent()` rather than `JsonSerializer.Deserialize<RheoEvent>()` directly.

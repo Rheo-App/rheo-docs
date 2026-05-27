@@ -1,0 +1,84 @@
+---
+title: SDK Overview
+description: Official client libraries for the Rheo integration API — TypeScript and C#.
+sidebar:
+  order: 1
+---
+
+Rheo publishes official client libraries that wrap the REST API with typed methods, automatic retry, and built-in webhook signature verification.
+
+| | Raw HTTP | TypeScript SDK | C# SDK |
+|---|---|---|---|
+| Auth header wiring | Manual | Automatic | Automatic |
+| Retry on 429 / 5xx | Manual | Built-in (exp. backoff) | Built-in (exp. backoff) |
+| Typed request/response | No | Yes | Yes |
+| Webhook verification | Manual | `webhooks.verify()` | `Webhooks.Verify()` |
+| Error types | HTTP status codes | `RheoApiError` hierarchy | `RheoApiException` hierarchy |
+
+## Available SDKs
+
+| Language | Package | Source |
+|---|---|---|
+| TypeScript / Node.js | [`@rheo/sdk`](https://www.npmjs.com/package/@rheo/sdk) | [GitHub](https://github.com/Rheo-App/rheo-typescript-sdk) |
+| C# / .NET | [`Rheo.Sdk`](https://www.nuget.org/packages/Rheo.Sdk) | [GitHub](https://github.com/Rheo-App/rheo-csharp-sdk) |
+
+## Common features
+
+### Automatic retry
+
+Both SDKs retry on `429 Too Many Requests` and `5xx` server errors using exponential backoff. The default is up to 3 retries with delays of 200 ms, 400 ms, 800 ms. If the server returns a `Retry-After` header, that delay is used instead.
+
+```
+429 → wait 200 ms → retry
+429 → wait 400 ms → retry
+429 → wait 800 ms → retry
+RheoRateLimitError / RheoRateLimitException thrown
+```
+
+### Typed errors
+
+On a non-retryable failure the SDK throws a typed error — never a raw HTTP object.
+
+```
+RheoApiError / RheoApiException        status, code, requestId
+  └─ RheoRateLimitError /              status=429, retryAfter
+     RheoRateLimitException
+
+RheoWebhookSignatureError /            webhook HMAC mismatch
+RheoWebhookSignatureException
+```
+
+### Webhook signature verification
+
+Both SDKs verify the `X-Rheo-Signature: sha256=...` header using a timing-safe HMAC-SHA256 comparison. Signature verification is a one-liner:
+
+```typescript
+const event = client.webhooks.verify(rawBody, req.headers['x-rheo-signature'])
+```
+
+```csharp
+var evt = client.Webhooks.Verify(rawBody, request.Headers["X-Rheo-Signature"]);
+```
+
+## Reseller sub-account routing
+
+When acting as a reseller on behalf of a member company, pass `partnerAccount` / `PartnerAccount` to the client constructor. All item operations are scoped to that member's account automatically.
+
+```typescript
+const rheo = new RheoClient({
+  apiKey: process.env.RHEO_API_KEY!,
+  partnerAccount: '9', // your internal member ID
+})
+```
+
+```csharp
+var rheo = new RheoClient(new RheoClientOptions
+{
+    ApiKey = Environment.GetEnvironmentVariable("RHEO_API_KEY")!,
+    PartnerAccount = "9",
+});
+```
+
+## Base URL
+
+All SDKs default to `https://market.rheo.se`. Override with `baseUrl` / `BaseUrl` for staging or self-hosted deployments.

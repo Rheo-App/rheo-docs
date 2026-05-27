@@ -1,0 +1,401 @@
+---
+title: TypeScript SDK
+description: Official Node.js/TypeScript client for the Rheo integration API.
+sidebar:
+  order: 2
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+## Installation
+
+<Tabs>
+  <TabItem label="npm">
+    ```bash
+    npm install @rheo/sdk
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```bash
+    pnpm add @rheo/sdk
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```bash
+    yarn add @rheo/sdk
+    ```
+  </TabItem>
+</Tabs>
+
+**Requires Node.js 18 or later.**
+
+## Setup
+
+```typescript
+import { RheoClient } from '@rheo/sdk'
+
+const rheo = new RheoClient({
+  apiKey: process.env.RHEO_API_KEY!,
+  webhookSecret: process.env.RHEO_WEBHOOK_SECRET!, // optional, required for webhook verification
+})
+```
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `apiKey` | `string` | required | API key from the Rheo partner dashboard |
+| `webhookSecret` | `string` | — | `whsec_...` secret for webhook signature verification |
+| `baseUrl` | `string` | `https://market.rheo.se` | Override for staging or self-hosted |
+| `timeout` | `number` (ms) | `30000` | Per-request timeout |
+| `maxRetries` | `number` | `3` | Max retries on 429 / 5xx |
+| `partnerAccount` | `string` | — | Reseller member ID — scopes all item calls to that account |
+
+---
+
+## Items
+
+### Push a single item
+
+```typescript
+const result = await rheo.items.upsert('ERP_PART_12345', {
+  title: 'Volvo XC90 bromsok fram vänster — 2018',
+  description: 'Testad och fungerande. Skick B.',
+  price: 950,
+  shippingCost: 149,
+  weightKg: 3.2,
+  imageUrls: [
+    'https://cdn.example.com/parts/12345/1.jpg',
+    'https://cdn.example.com/parts/12345/2.jpg',
+  ],
+  domain: {
+    domain: 'automotive_part',
+    oemCode: '31400452',
+    manufacturer: 'Volvo',
+    compatibleModels: ['XC90'],
+    donorVehicleYear: 2018,
+    conditionGrade: 'B',
+  },
+  autoPublishTradera: true,
+  useAiEnhancement: true,
+})
+// result.success === true
+// result.itemId — Rheo's internal UUID
+```
+
+`upsert` creates or updates by `externalId`. The same call works for both new items and updates — Rheo resolves the existing record by your ID.
+
+### Get item status
+
+```typescript
+const item = await rheo.items.get('ERP_PART_12345')
+// item.rheoStatus     — 'draft' | 'active' | 'sold' | 'not_listed' | 'archived'
+// item.traderaAdUrl   — direct link to the live Tradera auction
+// item.price          — current price in SEK
+```
+
+### Update price
+
+Updates the price and queues a Tradera bid-start update if the item is live.
+
+```typescript
+await rheo.items.updatePrice('ERP_PART_12345', { price: 850 })
+```
+
+### Update status
+
+```typescript
+await rheo.items.updateStatus('ERP_PART_12345', { status: 'not_listed' })
+// or:
+await rheo.items.updateStatus('ERP_PART_12345', { status: 'sold' })
+```
+
+### Delete
+
+Removes the item. If a Rheo order is in progress the item is archived instead of deleted.
+
+```typescript
+await rheo.items.delete('ERP_PART_12345')
+```
+
+---
+
+## Batch operations
+
+Push up to 500 items in a single call. Background processing is identical to single upserts.
+
+```typescript
+const parts = await dms.getPartsForVehicle('YV1CZ714581234567')
+
+const result = await rheo.items.batchUpsert({
+  items: parts.map((part) => ({
+    externalId: `VIN-YV1CZ714581234567-${part.partNumber}`,
+    parentExternalId: 'VIN-YV1CZ714581234567',
+    title: part.name,
+    description: part.notes,
+    price: part.askingPrice,
+    shippingCost: 149,
+    imageUrls: part.photos.map((p) => p.url),
+    domain: {
+      domain: 'automotive_part',
+      oemCode: part.oemCode,
+      manufacturer: 'Volvo',
+      conditionGrade: part.grade,
+    },
+    metadata: {
+      locationBin: part.binLocation,
+      dismantledBy: part.technicianId,
+    },
+    autoPublishTradera: part.grade !== 'C',
+  })),
+})
+
+console.log(`Accepted: ${result.accepted}, rejected: ${result.rejected}`)
+result.errors.forEach((e) => console.error(`${e.externalId}: ${e.reason}`))
+```
+
+---
+
+## Querying items
+
+List items with optional filters. Uses cursor pagination.
+
+```typescript
+// All active parts for a vehicle
+const page = await rheo.items.list({
+  parentExternalId: 'VIN-YV1CZ714581234567',
+  status: 'active',
+  limit: 100,
+})
+
+// Incremental sync — items changed in the last 24 hours
+const updated = await rheo.items.list({
+  updatedSince: new Date(Date.now() - 86_400_000),
+})
+
+// Paginate
+let cursor: string | undefined
+do {
+  const page = await rheo.items.list({ limit: 100, cursor })
+  // process page.items ...
+  cursor = page.nextCursor
+} while (cursor)
+```
+
+### Container summary
+
+Aggregate view across all children of a container (e.g. a donor vehicle).
+
+```typescript
+const summary = await rheo.items.summary('VIN-YV1CZ714581234567')
+// summary.children.total            — total part count
+// summary.children.byStatus.active  — parts currently live on Tradera
+// summary.revenue.totalSek           — cumulative revenue from all sales
+// summary.revenue.pendingListedSek   — estimated value of live listings
+```
+
+### Item history
+
+```typescript
+const { history } = await rheo.items.history('ERP_PART_12345')
+history.forEach((entry) => console.log(`${entry.at} — ${entry.event}`))
+```
+
+---
+
+## Vehicle hierarchy
+
+Model donor vehicles as container items. Parts point to their vehicle via `parentExternalId`.
+
+```typescript
+// 1. Register the donor vehicle
+await rheo.items.upsert('VIN-YV1CZ714581234567', {
+  type: 'container',
+  title: 'Volvo XC90 II 2018 — VIN YV1CZ714581234567',
+  metadata: {
+    vin: 'YV1CZ714581234567',
+    make: 'Volvo',
+    model: 'XC90 II',
+    year: 2018,
+    receivedAt: new Date().toISOString(),
+  },
+})
+
+// 2. Push all parts in one batch
+await rheo.items.batchUpsert({
+  items: parts.map((p) => ({
+    externalId: `VIN-YV1CZ714581234567-${p.partNumber}`,
+    parentExternalId: 'VIN-YV1CZ714581234567',
+    type: 'item',
+    // ... rest of fields
+  })),
+})
+```
+
+Container items are not listed for sale — they aggregate metadata and revenue from their children.
+
+---
+
+## Metadata
+
+Attach arbitrary key-value pairs to any item. Rheo stores and returns them verbatim — they are never processed. Use them for internal data (bin locations, technician IDs, cost prices) that you want available in webhook payloads and query responses.
+
+```typescript
+await rheo.items.upsert('ERP_PART_12345', {
+  // ...
+  metadata: {
+    locationBin: 'A-12-3',
+    dismantledBy: 'erik',
+    dismantledAt: '2026-05-27T09:15:00Z',
+    internalCost: 200,
+  },
+})
+```
+
+Limits: 50 keys per item, 1 KB per value.
+
+---
+
+## Webhooks
+
+### Express middleware
+
+```typescript
+import express from 'express'
+import { RheoClient } from '@rheo/sdk'
+
+const rheo = new RheoClient({
+  apiKey: process.env.RHEO_API_KEY!,
+  webhookSecret: process.env.RHEO_WEBHOOK_SECRET!,
+})
+
+const app = express()
+
+// Mount before any body-parser — the middleware buffers the raw body itself
+app.post('/webhooks/rheo', rheo.webhooks.middleware(), (req, res) => {
+  const event = rheo.webhooks.fromRequest(req)
+
+  switch (event.type) {
+    case 'item.sold': {
+      const { externalId, salePrice, platform } = event.data
+      // update your DMS
+      break
+    }
+    case 'listing.created': {
+      const { externalId, platformAdUrl } = event.data
+      // record Tradera link
+      break
+    }
+    case 'listing.failed': {
+      const { externalId, reason } = event.data
+      // alert operations team
+      break
+    }
+  }
+
+  res.sendStatus(200)
+})
+```
+
+### Manual verification
+
+If you manage your own body parsing:
+
+```typescript
+app.post(
+  '/webhooks/rheo',
+  express.raw({ type: 'application/json' }),
+  (req, res) => {
+    const event = rheo.webhooks.verify(
+      req.body,                               // Buffer — raw bytes, not parsed JSON
+      req.headers['x-rheo-signature'] as string,
+    )
+    // event is typed as RheoEvent
+    res.sendStatus(200)
+  },
+)
+```
+
+**Always pass the raw request body bytes to `verify()`.** Re-serializing a parsed JSON object will produce a different byte sequence and fail the HMAC check.
+
+---
+
+## Error handling
+
+```typescript
+import { RheoApiError, RheoRateLimitError, RheoWebhookSignatureError } from '@rheo/sdk'
+
+try {
+  await rheo.items.upsert('PART_001', { title: 'Test', price: 100, shippingCost: 50 })
+} catch (err) {
+  if (err instanceof RheoRateLimitError) {
+    console.log(`Rate limited. Retry after ${err.retryAfter ?? 'unknown'} seconds`)
+  } else if (err instanceof RheoApiError) {
+    console.error(`API error ${err.status}: ${err.message}`)
+    // err.code       — machine-readable error code (when available)
+    // err.requestId  — x-request-id header, useful for support
+  } else {
+    throw err
+  }
+}
+```
+
+The SDK retries 429 and 5xx responses automatically (up to `maxRetries`). `RheoRateLimitError` is only thrown if retries are exhausted.
+
+---
+
+## TypeScript types
+
+The SDK exports all types. Import them for use in your own type definitions.
+
+```typescript
+import type {
+  RheoEvent,
+  ItemSoldEvent,
+  DomainObjectAutomotivePart,
+  RheoItemStatus,
+  BatchUpsertItem,
+} from '@rheo/sdk'
+
+function handleSale(event: ItemSoldEvent) {
+  // event.data.externalId, event.data.salePrice, event.data.platform
+}
+
+function isAutomotivePart(
+  domain: DomainObject,
+): domain is DomainObjectAutomotivePart {
+  return domain.domain === 'automotive_part'
+}
+```
+
+### RheoEvent discriminated union
+
+```typescript
+type RheoEvent =
+  | { type: 'item.created';             data: { externalId: string } }
+  | { type: 'item.images_ready';        data: { externalId: string; imageCount: number } }
+  | { type: 'item.ai_priced';           data: { externalId: string; aiPrice: number } }
+  | { type: 'item.ai_listed';           data: { externalId: string; title: string; description: string } }
+  | { type: 'listing.created';          data: { externalId: string; platform: string; platformAdId: string; platformAdUrl?: string } }
+  | { type: 'listing.ended';            data: { externalId: string; platform: string } }
+  | { type: 'listing.failed';           data: { externalId: string; platform: string; reason: string } }
+  | { type: 'item.sold';                data: { externalId: string; salePrice: number; platform: string } }
+  | { type: 'item.status_changed';      data: { externalId: string; fromStatus: string; toStatus: string } }
+  | { type: 'workflow.approval_pending'; data: { runId: string; workflowId: string; prompt: string } }
+  | { type: 'workflow.step_completed';  data: { runId: string; workflowId: string; nodeId: string } }
+  | { type: 'workflow.run_completed';   data: { runId: string; workflowId: string; status: string } }
+```
+
+The TypeScript compiler narrows `event.data` automatically in `switch (event.type)` blocks.
+
+---
+
+## CommonJS / ESM
+
+The package ships both CommonJS (`dist/index.js`) and ESM (`dist/index.mjs`) builds. It works in Node.js CJS projects without any configuration.
+
+```javascript
+// CommonJS
+const { RheoClient } = require('@rheo/sdk')
+
+// ESM
+import { RheoClient } from '@rheo/sdk'
+```

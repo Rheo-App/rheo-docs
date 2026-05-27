@@ -27,6 +27,14 @@ export default defineConfig({
             { label: 'Partner Analytics', link: '/integration/partner/' },
           ],
         },
+        {
+          label: 'Client SDKs',
+          items: [
+            { label: 'Overview', link: '/sdk/overview/' },
+            { label: 'TypeScript', link: '/sdk/typescript/' },
+            { label: 'C#', link: '/sdk/csharp/' },
+          ],
+        },
       ],
       customCss: ['./src/styles/custom.css'],
       head: [
