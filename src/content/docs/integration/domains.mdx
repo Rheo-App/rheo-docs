@@ -9,19 +9,21 @@ sidebar:
 
 Every item in Rheo belongs to exactly one **domain** — the unified classification that drives category display, Tradera publishing, structured search, and marketplace mapping.
 
-The domain is expressed as a JSON tagged union nested inside the `extended_attributes` JSONB column (stored) or the `domain` field in the integration API request body (over the wire). The `"domain"` key inside the object is the discriminant — it selects both the category slug and which attribute fields are valid.
+In the integration API **request body** the domain is a JSON tagged union sent as the `domain` field. The inner `"domain"` key is the discriminant — it selects both the category slug and which attribute fields are valid.
 
 ```json
 {
   "domain": {
     "domain": "auto_parts",
-    "partName": "Bromsok fram vänster",
-    "oemCode": "31400452"
+    "part": {
+      "name": "Bromsok fram vänster",
+      "oemNumber": "31400452"
+    }
   }
 }
 ```
 
-All field names follow **camelCase** in JSON. All slug values follow **snake_case** and match the `category` column in the `catalog_items` database table exactly.
+Attribute field names follow **camelCase**. Slug values follow **snake_case** and match the `category` column in the `catalog_items` database table exactly. (When stored, the same data is flattened — see [Extended attributes wrapper](#extended-attributes-wrapper) below.)
 
 ---
 
@@ -170,17 +172,7 @@ Different ERP systems classify parts under their own internal codes. `catalogCod
 
 The key is a short, stable system identifier chosen by the integration partner. The value is whatever code that system uses internally for this part type.
 
-**Querying by catalog code** (JSONB path):
-```
-extended_attributes->'part'->'catalogCodes'->>'recopart' = '7118'
-```
-
-**Lookup endpoint** (filter by system + code):
-```
-GET /integration/v1/items?catalogSystem=recopart&catalogCode=7118
-```
-
-To add a new ERP system, simply use a new key — no schema changes required.
+`catalogCodes` is stored verbatim and returned unchanged when you read the item back, so each connected system can always recover its own code. To add a new ERP system, simply use a new key — no schema changes required.
 
 #### Top-level condition fields
 
@@ -391,35 +383,41 @@ The complete list of unit slugs: `home_garden`, `art`, `sports`, `toys`, `tools`
 
 ## Extended attributes wrapper
 
-In the database and in full item responses the domain is wrapped inside `ItemExtendedData`:
+When stored in the `catalog_items.extended_attributes` JSONB column (and returned in the `extendedAttributes` field of a full item response), the domain is **flattened** into `ItemExtendedData`. The `domain` key holds the slug string and the attribute fields sit alongside it as siblings — there is no nested `domain` object at rest:
 
 ```json
 {
-  "externalReference": "ERP_PART_99182",
+  "external_reference": "ERP_PART_99182",
   "source": "recopart",
-  "domain": {
-    "domain": "auto_parts",
-    "partName": "Bromsok",
-    "conditionGrade": "B"
+  "schema_version": "1.0.0",
+  "domain": "auto_parts",
+  "part": { "name": "Bromsok" },
+  "conditionGrade": "B"
+}
+```
+
+| Field | Type | Set by | Description |
+|---|---|---|---|
+| `external_reference` | string | you | Your internal ID for this item. Taken from the `{external_id}` path segment of the upsert call; stored and returned as-is. |
+| `source` | string | Rheo | Origin system that created the item, e.g. `"integration"`, `"tradera"`, `"manual"`. |
+| `schema_version` | string | Rheo | Domain schema version stamped at write time, e.g. `"1.0.0"`. |
+| `domain` | string | you | The category slug. The matching attribute fields (`part`, `vehicle`, …) sit beside it. |
+
+### Request vs. storage
+
+The two shapes differ — this is the single most common source of confusion:
+
+- **Request body** (`PUT /integration/v1/items/{external_id}`): the domain is **nested** under a `domain` field as a tagged union. You send only `domain` and the item fields (`title`, `price`, …); `external_reference`, `source`, and `schema_version` are derived by Rheo.
+
+  ```json
+  {
+    "title": "Bromsok fram vänster — Volvo XC90 2018",
+    "price": 1450,
+    "domain": { "domain": "auto_parts", "part": { "name": "Bromsok" } }
   }
-}
-```
+  ```
 
-| Field | Type | Description |
-|---|---|---|
-| `externalReference` | string | Partner's internal ID for this item. Stored and returned as-is. |
-| `source` | string | Origin system that created the item, e.g. `"recopart"`, `"tradera"`, `"manual"`. |
-| `domain` | object | Tagged-union domain object. `null` for unit domains sent without attributes. |
-
-When submitting via the integration API you set these at the top level of the request body:
-
-```json
-{
-  "title": "Bromsok fram vänster — Volvo XC90 2018",
-  "externalReference": "ERP_PART_99182",
-  "domain": { "domain": "auto_parts", ... }
-}
-```
+- **Storage / read** (`extendedAttributes` on the item response): the same domain is **flattened** as shown above.
 
 ---
 
@@ -458,9 +456,9 @@ GET https://market.rheo.se/categories
     "descriptionEn": "Car parts, engines, gearboxes and body panels",
     "searchFields": [
       {
-        "key": "oem_code",
-        "labelSv": "OEM-kod",
-        "labelEn": "OEM Code",
+        "key": "oem_number",
+        "labelSv": "OEM-nummer",
+        "labelEn": "OEM Number",
         "fieldType": "text",
         "placeholder": "31338723"
       }
@@ -565,4 +563,4 @@ Skick: B
 Passar: Volvo XC90 (2018)
 ```
 
-The more attribute fields you include, the better the ad performs in Tradera's internal search. For `auto_parts`, `oemCode` and `partName` are the highest-impact fields.
+The more attribute fields you include, the better the ad performs in Tradera's internal search. For `auto_parts`, `part.oemNumber` and `part.name` are the highest-impact fields.

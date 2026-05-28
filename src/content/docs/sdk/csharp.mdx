@@ -81,12 +81,19 @@ var result = await rheo.Items.UpsertAsync("ERP_PART_12345", new UpsertItemReques
     ],
     Domain = new AutoPartsDomain
     {
-        PartName = "Bromsok fram vänster",
-        OemCode = "31400452",
-        Manufacturer = "Volvo",
-        CompatibleModels = ["XC90"],
-        DonorVehicleYear = 2018,
-        VehicleType = "Bil",
+        Vehicle = new DonorVehicle
+        {
+            Manufacturer = "Volvo",
+            Model = "XC90",
+            Year = 2018,
+            VehicleType = "Bil",
+        },
+        Part = new PartInfo
+        {
+            Name = "Bromsok fram vänster",
+            OemNumber = "31400452",
+            CatalogCodes = new Dictionary<string, string> { ["recopart"] = "7118" },
+        },
         ConditionGrade = "B",
     },
     AutoPublishTradera = true,
@@ -147,10 +154,8 @@ var result = await rheo.Items.BatchUpsertAsync(new BatchUpsertRequest
         ImageUrls = p.Photos.Select(ph => ph.Url).ToList(),
         Domain = new AutoPartsDomain
         {
-            PartName = p.Name,
-            OemCode = p.OemCode,
-            Manufacturer = "Volvo",
-            VehicleType = "Bil",
+            Vehicle = new DonorVehicle { Manufacturer = "Volvo", VehicleType = "Bil" },
+            Part = new PartInfo { Name = p.Name, OemNumber = p.OemNumber },
             ConditionGrade = p.Grade,
         },
         Metadata = new Dictionary<string, object?>
@@ -369,14 +374,23 @@ enum RheoItemStatus { Draft, Active, Sold, NotListed, Archived }
 // Item type
 enum RheoItemType { Item, Container }
 
-// Domain objects
-abstract class DomainObject { }
-sealed class AutoPartsDomain : DomainObject
-  { PartName, OemCode, Manufacturer, CompatibleModels, DonorVehicleYear, VehicleType, ConditionGrade }
-sealed class ElectronicsDomain : DomainObject
-  { Brand, Model, StorageGb, Condition }
-sealed class FashionDomain : DomainObject
-  { Brand, Size, Color, Condition }
+// Domain objects (polymorphic on the "domain" discriminator)
+abstract class DomainObject { string Domain }   // slug accessor, not serialized
+class DonorVehicle { Manufacturer, Model, Year, VehicleType }
+class PartInfo     { Name, OemNumber, CatalogCodes (IReadOnlyDictionary<string,string>) }
+
+// Rich domains (typed attributes)
+sealed class AutoPartsDomain : DomainObject   { Vehicle (DonorVehicle), Part (PartInfo), ConditionGrade, ConditionNote }
+sealed class VehiclesDomain : DomainObject    { RegistrationPlate, Make, Model, Year, MileageKm, FuelType, Color }
+sealed class ElectronicsDomain : DomainObject { SerialNumber, MemoryGb, BatteryHealthPercentage }
+sealed class ComputersDomain : DomainObject   { SerialNumber, MemoryGb, BatteryHealthPercentage }
+sealed class FashionDomain : DomainObject     { Size, Material, Gender }
+sealed class BooksDomain : DomainObject       { Isbn, Author, Publisher, Language }
+sealed class WatchesDomain : DomainObject     { Brand, ModelReference, MovementType, CaseSizeMm }
+
+// Unit domains (discriminant only): HomeGardenDomain, ArtDomain, SportsDomain,
+// ToysDomain, ToolsDomain, JewelryDomain, MusicDomain, CollectiblesDomain,
+// BeautyDomain, IndustrialDomain, OtherDomain
 
 // Event types (use pattern matching)
 abstract class RheoEvent { Id, Timestamp, ApiVersion, Type }

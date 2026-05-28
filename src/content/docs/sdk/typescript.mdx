@@ -68,12 +68,17 @@ const result = await rheo.items.upsert('ERP_PART_12345', {
   ],
   domain: {
     domain: 'auto_parts',
-    partName: 'Bromsok fram vänster',
-    oemCode: '31400452',
-    manufacturer: 'Volvo',
-    compatibleModels: ['XC90'],
-    donorVehicleYear: 2018,
-    vehicleType: 'Bil',
+    vehicle: {
+      manufacturer: 'Volvo',
+      model: 'XC90',
+      year: 2018,
+      vehicleType: 'Bil',
+    },
+    part: {
+      name: 'Bromsok fram vänster',
+      oemNumber: '31400452',
+      catalogCodes: { recopart: '7118' },
+    },
     conditionGrade: 'B',
   },
   autoPublishTradera: true,
@@ -138,10 +143,8 @@ const result = await rheo.items.batchUpsert({
     imageUrls: part.photos.map((p) => p.url),
     domain: {
       domain: 'auto_parts',
-      partName: part.name,
-      oemCode: part.oemCode,
-      manufacturer: 'Volvo',
-      vehicleType: 'Bil',
+      vehicle: { manufacturer: 'Volvo', vehicleType: 'Bil' },
+      part: { name: part.name, oemNumber: part.oemNumber },
       conditionGrade: part.grade,
     },
     metadata: {
@@ -354,6 +357,7 @@ The SDK exports all types. Import them for use in your own type definitions.
 import type {
   RheoEvent,
   ItemSoldEvent,
+  DomainObject,
   DomainObjectAutoParts,
   RheoItemStatus,
   BatchUpsertItem,
@@ -367,6 +371,11 @@ function isAutoPart(
   domain: DomainObject,
 ): domain is DomainObjectAutoParts {
   return domain.domain === 'auto_parts'
+}
+
+// Narrowing gives full typing on the nested attributes:
+function oemNumberOf(domain: DomainObject): string | undefined {
+  return isAutoPart(domain) ? domain.part?.oemNumber : undefined
 }
 ```
 
