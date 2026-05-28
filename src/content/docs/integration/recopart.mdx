@@ -1,0 +1,180 @@
+---
+title: Recopart integration guide
+description: End-to-end guide for a dismantling-network ERP integrating with Rheo via the C# SDK.
+sidebar:
+  order: 12
+---
+
+This is an end-to-end guide for a Recopart-style integration: a parts ERP that manages
+many dismantling yards and pushes inventory to Rheo for listing on Tradera. It uses the
+real, live API and the [C# SDK](/sdk/csharp/).
+
+:::caution[What changed since the April analysis]
+An earlier April analysis targeted `POST /b2b/inventory/sync` with flat top-level
+`vehicle` / `part` / `condition` objects and a `part.code` field. **That API does not
+exist.** Build against this instead:
+
+- Items are upserted at **`PUT /integration/v1/items/{external_id}`** (your id in the
+  path), not a `/b2b/inventory/sync` endpoint.
+- Domain data is **nested** under `domain → auto_parts → { vehicle, part, conditionGrade }`,
+  not flat top-level objects.
+- Recopart's internal PartCode maps to **`part.catalogCodes.recopart`**, not `part.code`
+  and not `oemNumber`.
+- There is no order-tracking endpoint in the integration API today.
+:::
+
+## 1. Authentication
+
+All item calls use your API key in the `x-api-key` header. The C# SDK sets it for you:
+
+```csharp
+using Rheo.Sdk;
+using Rheo.Sdk.Types;
+
+var rheo = new RheoClient(new RheoClientOptions
+{
+    ApiKey = Environment.GetEnvironmentVariable("RHEO_API_KEY")!,
+    WebhookSecret = Environment.GetEnvironmentVariable("RHEO_WEBHOOK_SECRET"),
+});
+```
+
+## 2. The real endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `PUT` | `/integration/v1/items/{external_id}` | Create or update an item (upsert by your id). |
+| `GET` | `/integration/v1/items/{external_id}` | Status (Rheo + Tradera). |
+| `PATCH` | `/integration/v1/items/{external_id}/price` | Update price. |
+| `PATCH` | `/integration/v1/items/{external_id}/status` | Set `sold` or `not_listed`. |
+| `DELETE` | `/integration/v1/items/{external_id}` | Remove (archived if an order is in progress). |
+| `POST` | `/integration/v1/items/batch` | Upsert up to 500 items. |
+| `GET` | `/integration/v1/items` | List/sync with filters + cursor pagination. |
+| `GET` | `/integration/v1/items/{external_id}/children` | Parts under a donor vehicle. |
+| `GET` | `/integration/v1/items/{external_id}/summary` | Roll-up across a vehicle's parts. |
+| `GET` | `/integration/v1/items/{external_id}/history` | Lifecycle history for an item. |
+
+## 3. Mapping a part — the domain shape
+
+A part is an `auto_parts` item with the donor vehicle and part nested under `domain`.
+**Recopart's PartCode goes in `part.catalogCodes.recopart`.** Reserve `oemNumber` for
+true OEM part numbers.
+
+```csharp
+await rheo.Items.UpsertAsync("10-23215783", new UpsertItemRequest
+{
+    Title = "Stötdämpare bak — Volvo XC90 2018",
+    Price = 950,
+    ShippingCost = 149,
+    ImageUrls = ["https://cdn.recopart.example/10/23215783/1.jpg"],
+    Domain = new AutoPartsDomain
+    {
+        Vehicle = new DonorVehicle
+        {
+            Manufacturer = "Volvo",
+            Model = "XC90",
+            Year = 2018,
+            VehicleType = "Bil",
+        },
+        Part = new PartInfo
+        {
+            Name = "Stötdämpare bak",
+            OemNumber = "31400452",   // a real OEM number, if known
+            CatalogCodes = new Dictionary<string, string>
+            {
+                ["recopart"] = "7118", // Recopart's internal PartCode
+            },
+        },
+        ConditionGrade = "B",
+    },
+    AutoPublishTradera = true,
+});
+```
+
+### Donor vehicle as a container (optional but recommended)
+
+Model the donor vehicle as a `container`, then attach parts to it via `ParentExternalId`.
+Containers are not sold themselves — they give you a per-vehicle roll-up
+(`SummaryAsync`) and a parts list (`ChildrenAsync`).
+
+```csharp
+await rheo.Items.UpsertAsync("10-VIN-YV1CZ714581234567", new UpsertItemRequest
+{
+    Type = RheoItemType.Container,
+    Title = "Volvo XC90 II 2018 — donor",
+    Metadata = new Dictionary<string, object?> { ["vin"] = "YV1CZ714581234567" },
+});
+
+await rheo.Items.UpsertAsync("10-23215783", new UpsertItemRequest
+{
+    ParentExternalId = "10-VIN-YV1CZ714581234567",
+    Title = "Stötdämpare bak",
+    Price = 950,
+    Domain = new AutoPartsDomain { /* … as above … */ },
+});
+```
+
+## 4. Many yards, one key — reseller routing
+
+Recopart is a **reseller**: one API key manages every yard, each of which is a Rheo
+[member account](/integration/reseller/). Route each call to a yard with `ForAccount`,
+passing the yard's reference (its `external_id`, e.g. `10`):
+
+```csharp
+// Push to yard 10, then yard 22 — same client, same key
+await rheo.ForAccount("10").Items.UpsertAsync("10-23215783", part10);
+await rheo.ForAccount("22").Items.UpsertAsync("22-55012", part22);
+
+// Reconcile a single yard's live inventory
+var liveAt10 = await rheo.ForAccount("10").Items.ListAsync(
+    new ListItemsParams { Status = RheoItemStatus.Active });
+```
+
+Yards onboard themselves through Recopart's public page (`rheo.se/p/recopart`) — see
+[Onboarding](/integration/onboarding/). Recopart names each yard's reference in the
+**Managed accounts** UI; that name is what you pass to `ForAccount`. Each yard keeps its
+own Tradera connection and payout; Rheo bills Recopart once for the whole network
+([Deals & Billing](/integration/deals/)).
+
+## 5. Reacting to sales — webhooks
+
+Register one webhook endpoint with `scope: "members"` to receive events from **every**
+yard. Each delivery carries `data.account.memberExternalId`, so you decrement the right
+yard's stock:
+
+```csharp
+app.MapPost("/webhooks/rheo", async (HttpRequest request, RheoClient rheo) =>
+{
+    using var reader = new StreamReader(request.Body);
+    var rawBody = await reader.ReadToEndAsync();
+    var signature = request.Headers["X-Rheo-Signature"].ToString();
+
+    // Verify with the receiving endpoint's own secret
+    RheoEvent evt;
+    try { evt = rheo.Webhooks.Verify(rawBody, signature, endpointSecret); }
+    catch (RheoWebhookSignatureException) { return Results.Unauthorized(); }
+
+    if (evt is ItemSoldEvent sold)
+    {
+        var yard = sold.Data.Account?.MemberExternalId;   // e.g. "10"
+        await recopart.DecrementStockAsync(yard, sold.Data.ExternalId, sold.Data.SalePrice);
+    }
+
+    return Results.Ok();
+});
+```
+
+Delivered events: `item.created`, `item.images_ready`, `listing.created`,
+`listing.ended`, `listing.failed`, `item.sold`. Each endpoint has its own signing
+secret — see [Webhooks](/integration/webhooks/).
+
+:::note[Order tracking]
+The integration API does not expose an order-tracking endpoint today. React to
+`item.sold` for fulfilment; the order itself is handled in the Rheo dashboard.
+:::
+
+## 6. Recommended sync loop
+
+1. On dismantle, upsert the donor vehicle (container) and its parts (`ForAccount(yard)`),
+   mapping PartCode → `catalogCodes.recopart`.
+2. Listen for `item.sold` and decrement the originating yard's stock.
+3. Nightly, reconcile per yard with `ListAsync({ updatedSince })` to catch anything missed.

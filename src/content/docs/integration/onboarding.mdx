@@ -1,0 +1,49 @@
+---
+title: Self-serve onboarding
+description: How a member connects to a reseller — the connect flow, billing consent, and disconnect.
+sidebar:
+  order: 10
+---
+
+A reseller publishes a branded page; members connect themselves in one click. No manual
+account linking by Rheo is required.
+
+## The connect flow
+
+1. A member visits the reseller's public page at `rheo.se/p/<slug>`.
+2. They click **Connect** (`POST /p/:slug/connect`).
+3. Rheo creates the membership and sets the member's deal to
+   [`sub_account`](/integration/deals/), linked to the reseller.
+
+The reseller must hold a [`reseller_agreement`](/integration/deals/) deal for the connect
+button to be active — the public profile exposes `ownerHasResellerDeal` so the page can
+disable Connect otherwise.
+
+## What the member is agreeing to
+
+The connect screen makes the money model explicit, and you should mirror it wherever you
+drive members to connect:
+
+- **Billing:** Rheo bills the **reseller**, not the member.
+- **Payouts:** sale proceeds go to the **member's own** account — connecting does not
+  redirect payouts.
+- **Revocable:** the member can disconnect at any time (`DELETE /business/my-deal`),
+  which reverts them to `consumer_default`.
+
+A member keeps their own Tradera connection and account throughout — see the
+[Reseller model](/integration/reseller/) invariant.
+
+## Naming the member's reference
+
+After a member connects, the reseller sets a stable reference for them in the business
+**Managed accounts** UI (`PUT /business/my-profile/connections/{memberUserId}`). That
+reference is the `external_id` you pass as `X-Partner-Account` to route API calls and
+the `memberExternalId` you receive on `members`-scope webhooks. Defaulting and renaming
+are the reseller's responsibility — pick something your systems already use (e.g. a yard
+number like `10`).
+
+## Disconnecting
+
+A member disconnects themselves with `DELETE /business/my-deal`. It is idempotent, never
+touches a paid deal, and reverts the member to `consumer_default`. Their items and
+Tradera connection are unaffected.

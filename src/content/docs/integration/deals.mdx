@@ -1,0 +1,46 @@
+---
+title: Deals & Billing
+description: How Rheo bills B2B accounts — the six deal types and how to get one.
+sidebar:
+  order: 11
+---
+
+Every Rheo account has a **deal** that determines how it is billed. Consumers get the
+default; businesses get a deal tailored in conversation with Rheo. Your current deal is
+shown in the dashboard under **Business → Billing** (`GET /business/my-deal`).
+
+## The six deal types
+
+| Deal | Who it's for | How billing works |
+|---|---|---|
+| `consumer_default` | Individuals | Standard consumer terms. No B2B invoicing. |
+| `direct_commission` | Businesses selling on their own account | A commission (`commissionBps`, basis points) on each sale. |
+| `flat_monthly` | Predictable-volume businesses | A fixed monthly fee (`flatMonthlyOre`), no per-sale commission. |
+| `flat_plus_per_listing` | High-volume listers | A monthly fee **plus** a per-listing fee (`flatMonthlyOre` + `perListingOre`). |
+| `reseller_agreement` | Resellers managing many accounts | One aggregated commission (`commissionBps`) across **all** managed members; Rheo sends the reseller a single invoice. |
+| `sub_account` | A member managed by a reseller | Billing flows to the reseller (`resellerId`); the member is **not** billed by Rheo directly. |
+
+:::note
+Amounts (`commissionBps`, `flatMonthlyOre`, `perListingOre`) are set per agreement.
+`100` basis points = 1%. `*Ore` values are in öre (1 SEK = 100 öre).
+:::
+
+## How to get a deal
+
+Paid deals are **granted by Rheo after a conversation** — there is no self-serve
+activation of a paid deal. Request one from the dashboard (**Business → Billing →
+Request a B2B deal**), which records a lead (`POST /business/deal-requests`). Rheo
+reviews it and configures the deal; submitting a request never grants or changes a deal
+on its own.
+
+The exception is the reseller flow: when a member connects to a reseller's page, Rheo
+automatically sets that member's deal to `sub_account` (and reverts it to
+`consumer_default` if they disconnect). See [Reseller model](/integration/reseller/) and
+[Onboarding](/integration/onboarding/).
+
+## Reseller billing in one line
+
+A `reseller_agreement` holder is billed once for the whole network: Rheo sums sales
+across every `sub_account` they manage and applies the reseller's `commissionBps`.
+Members keep their own payouts — the reseller relationship changes **credentials and
+billing only**, never where sale proceeds land.

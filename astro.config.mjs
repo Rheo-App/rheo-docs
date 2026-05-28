@@ -26,6 +26,10 @@ export default defineConfig({
             { label: 'Errors', link: '/integration/errors/' },
             { label: 'Management API', link: '/integration/management/' },
             { label: 'Partner Analytics', link: '/integration/partner/' },
+            { label: 'Reseller Model', link: '/integration/reseller/' },
+            { label: 'Onboarding', link: '/integration/onboarding/' },
+            { label: 'Deals & Billing', link: '/integration/deals/' },
+            { label: 'Recopart Guide', link: '/integration/recopart/' },
           ],
         },
         {

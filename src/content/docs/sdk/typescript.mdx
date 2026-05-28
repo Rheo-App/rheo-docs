@@ -193,17 +193,30 @@ Aggregate view across all children of a container (e.g. a donor vehicle).
 
 ```typescript
 const summary = await rheo.items.summary('VIN-YV1CZ714581234567')
-// summary.children.total            — total part count
-// summary.children.byStatus.active  — parts currently live on Tradera
-// summary.revenue.totalSek           — cumulative revenue from all sales
-// summary.revenue.pendingListedSek   — estimated value of live listings
+// summary.childCount   — total part count
+// summary.activeCount  — parts currently live on Tradera
+// summary.soldCount    — parts sold
+// summary.draftCount   — parts not yet listed
+// summary.listedValue  — sum of active listing prices (SEK)
+// summary.soldValue    — gross value of sold parts (SEK)
+```
+
+### List children
+
+The parts under a container.
+
+```typescript
+const { children, count } = await rheo.items.children('VIN-YV1CZ714581234567')
+children.forEach((c) => console.log(`${c.externalId} — ${c.status} — ${c.price} SEK`))
 ```
 
 ### Item history
 
+Lifecycle milestones for an item, newest first.
+
 ```typescript
-const { history } = await rheo.items.history('ERP_PART_12345')
-history.forEach((entry) => console.log(`${entry.at} — ${entry.event}`))
+const { events } = await rheo.items.history('ERP_PART_12345')
+events.forEach((e) => console.log(`${e.createdAt} — ${e.eventType}`, e.data))
 ```
 
 ---
@@ -261,6 +274,28 @@ Limits: 50 keys per item, 1 KB per value.
 
 ---
 
+## Reseller routing
+
+If you manage several Rheo accounts under one reseller API key (e.g. a chain of
+dismantling yards), pass `partnerAccount` as a per-call option to route a single
+request to a specific member. The value is the reseller's `external_id` for that
+member — the reference you set in the business **Managed accounts** UI. It overrides
+any client-level `partnerAccount`:
+
+```typescript
+// One client + key, many yards
+await rheo.items.upsert('10-PART-001', data, { partnerAccount: '10' })
+await rheo.items.updatePrice('10-PART-001', { price: 800 }, { partnerAccount: '10' })
+const yard = await rheo.items.list({ status: 'active' }, { partnerAccount: '10' })
+```
+
+Every item method takes the optional `{ partnerAccount }` argument. Set
+`partnerAccount` on `RheoClient` instead to scope *every* call to a single account.
+
+See the [Reseller model](/integration/reseller/) for how membership and billing work.
+
+---
+
 ## Webhooks
 
 ### Express middleware
@@ -280,19 +315,19 @@ const app = express()
 app.post('/webhooks/rheo', rheo.webhooks.middleware(), (req, res) => {
   const event = rheo.webhooks.fromRequest(req)
 
-  switch (event.type) {
+  switch (event.eventType) {
     case 'item.sold': {
-      const { externalId, salePrice, platform } = event.data
-      // update your DMS
+      const { externalId, salePrice, account } = event.data
+      // account?.memberExternalId tells you which yard (reseller endpoints) — update your DMS
       break
     }
     case 'listing.created': {
-      const { externalId, platformAdUrl } = event.data
+      const { externalId, traderaAdUrl } = event.data
       // record Tradera link
       break
     }
     case 'listing.failed': {
-      const { externalId, reason } = event.data
+      const { externalId, error } = event.data
       // alert operations team
       break
     }
@@ -301,6 +336,9 @@ app.post('/webhooks/rheo', rheo.webhooks.middleware(), (req, res) => {
   res.sendStatus(200)
 })
 ```
+
+`fromRequest(req, secret?)` accepts an optional secret (or array of secrets) to verify
+with the receiving endpoint's secret — see [per-endpoint secrets](#per-endpoint-secrets).
 
 ### Manual verification
 
@@ -323,12 +361,29 @@ app.post(
 
 **Always pass the raw request body bytes to `verify()`.** Re-serializing a parsed JSON object will produce a different byte sequence and fail the HMAC check.
 
+### Per-endpoint secrets
+
+Each webhook endpoint has its **own** signing secret. Verify with the secret of the
+endpoint that received the event. Pass it as the third argument to `verify()` (it
+overrides the client-level `webhookSecret`), or pass an array to accept any of several
+secrets during rotation:
+
+```typescript
+const event = rheo.webhooks.verify(rawBody, signature, endpointSecret)
+
+// During secret rotation — succeeds if either matches:
+const rotating = rheo.webhooks.verify(rawBody, signature, [oldSecret, newSecret])
+```
+
+See [Webhooks](/integration/webhooks/) for managing multiple endpoints, event-type
+filters, and the `account` field added to every payload for reseller routing.
+
 ---
 
 ## Error handling
 
 ```typescript
-import { RheoApiError, RheoRateLimitError, RheoWebhookSignatureError } from '@rheo/sdk'
+import { RheoApiError, RheoRateLimitError, RheoWebhookSignatureError } from 'rheo-sdk'
 
 try {
   await rheo.items.upsert('PART_001', { title: 'Test', price: 100, shippingCost: 50 })
@@ -381,23 +436,31 @@ function oemNumberOf(domain: DomainObject): string | undefined {
 
 ### RheoEvent discriminated union
 
+Every event is `{ eventId, timestamp, eventType, data }`. The `data` object always
+carries the shared fields below plus an additive `account`; per-event fields are merged in.
+
 ```typescript
+interface EventAccount { rheoUserId: string; memberExternalId?: string }
+
+interface EventData {
+  externalId: string
+  rheoItemId: string
+  platform: string      // 'tradera' | 'rheo' | 'rheo_stripe' | 'rheo_swish'
+  salePrice: number     // 0 for non-sale events
+  currency: string
+  account?: EventAccount // memberExternalId present on reseller (members) endpoints
+}
+
 type RheoEvent =
-  | { type: 'item.created';             data: { externalId: string } }
-  | { type: 'item.images_ready';        data: { externalId: string; imageCount: number } }
-  | { type: 'item.ai_priced';           data: { externalId: string; aiPrice: number } }
-  | { type: 'item.ai_listed';           data: { externalId: string; title: string; description: string } }
-  | { type: 'listing.created';          data: { externalId: string; platform: string; platformAdId: string; platformAdUrl?: string } }
-  | { type: 'listing.ended';            data: { externalId: string; platform: string } }
-  | { type: 'listing.failed';           data: { externalId: string; platform: string; reason: string } }
-  | { type: 'item.sold';                data: { externalId: string; salePrice: number; platform: string } }
-  | { type: 'item.status_changed';      data: { externalId: string; fromStatus: string; toStatus: string } }
-  | { type: 'workflow.approval_pending'; data: { runId: string; workflowId: string; prompt: string } }
-  | { type: 'workflow.step_completed';  data: { runId: string; workflowId: string; nodeId: string } }
-  | { type: 'workflow.run_completed';   data: { runId: string; workflowId: string; status: string } }
+  | { eventType: 'item.created';      timestamp: string; eventId: string; data: EventData & { type?: 'item' | 'container' } }
+  | { eventType: 'item.images_ready'; timestamp: string; eventId: string; data: EventData & { imagesProcessed?: number } }
+  | { eventType: 'listing.created';   timestamp: string; eventId: string; data: EventData & { traderaAdId?: string; traderaAdUrl?: string } }
+  | { eventType: 'listing.ended';     timestamp: string; eventId: string; data: EventData & { traderaAdId?: string } }
+  | { eventType: 'listing.failed';    timestamp: string; eventId: string; data: EventData & { error?: string } }
+  | { eventType: 'item.sold';         timestamp: string; eventId: string; data: EventData & { traderaAdId?: string } }
 ```
 
-The TypeScript compiler narrows `event.data` automatically in `switch (event.type)` blocks.
+The TypeScript compiler narrows `event.data` automatically in `switch (event.eventType)` blocks.
 
 ---
 

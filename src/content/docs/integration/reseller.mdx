@@ -1,0 +1,71 @@
+---
+title: Reseller model
+description: Manage many Rheo accounts from one integration — sub-accounts, routing, and billing.
+sidebar:
+  order: 9
+---
+
+The reseller model lets one organisation manage many Rheo accounts from a single
+integration and a single API key. It is how a parts network (e.g. a chain of
+dismantling yards) operates on Rheo without running a separate integration per location.
+
+## Resellers and members
+
+- A **reseller** holds a [`reseller_agreement`](/integration/deals/) deal.
+- A **member** (sub-account) holds a [`sub_account`](/integration/deals/) deal and is
+  linked to its reseller.
+
+### The invariant
+
+> Every member keeps its **own** Rheo account, its **own** Tradera connection, and its
+> **own** payout.
+
+The reseller relationship changes only **credentials and billing**. It does **not** pool
+Tradera connections or sale proceeds — money from a member's sales still lands in that
+member's own account.
+
+## Routing calls with `X-Partner-Account`
+
+A reseller uses **one** API key and selects the member per request with the
+`X-Partner-Account` header. Its value is the reseller's own reference for that member —
+the `external_id` set in the business **Managed accounts** UI:
+
+```bash
+curl -X PUT https://market.rheo.se/integration/v1/items/10-PART-001 \
+  -H "x-api-key: $RESELLER_API_KEY" \
+  -H "X-Partner-Account: 10" \
+  -H "content-type: application/json" \
+  -d '{ "title": "Bromsok fram", "price": 800, "domain": { "domain": "auto_parts" } }'
+```
+
+The SDKs make this per-call:
+
+- **TypeScript:** `rheo.items.upsert(id, data, { partnerAccount: '10' })`
+- **C#:** `rheo.ForAccount("10").Items.UpsertAsync(id, data)`
+
+A reseller can rename a member's reference at any time
+(`PUT /business/my-profile/connections/{memberUserId}`); the new value is what you then
+pass as `X-Partner-Account`.
+
+## Billing
+
+Rheo sends **one aggregated invoice** to the reseller, applying the reseller's
+`commissionBps` to the combined sales of every member. Members are not billed by Rheo
+directly. See [Deals & Billing](/integration/deals/).
+
+## Webhooks across members
+
+Add a webhook endpoint with `scope: "members"` to receive events from **all** members in
+one place. Each such delivery includes `data.account.memberExternalId`, so a single
+endpoint can route the event to the right member:
+
+```json
+"account": { "rheoUserId": "<member's owner uuid>", "memberExternalId": "10" }
+```
+
+See [Webhooks](/integration/webhooks/) for endpoint management and verification.
+
+## Onboarding members
+
+Members join self-serve through the reseller's public page — see
+[Onboarding](/integration/onboarding/).

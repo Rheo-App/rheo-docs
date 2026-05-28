@@ -22,12 +22,12 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
   </TabItem>
   <TabItem label="PackageReference">
     ```xml
-    <PackageReference Include="Rheo.Sdk" Version="0.1.*" />
+    <PackageReference Include="Rheo.Sdk" Version="0.3.*" />
     ```
   </TabItem>
 </Tabs>
 
-**Requires .NET 8 or later.**
+**Requires .NET 7 or later.**
 
 ## Setup
 
@@ -205,16 +205,25 @@ do
 
 ```csharp
 var summary = await rheo.Items.SummaryAsync("VIN-YV1CZ714581234567");
-Console.WriteLine($"Parts live: {summary.Children.ByStatus["active"]}");
-Console.WriteLine($"Revenue: {summary.Revenue.TotalSek:N0} SEK");
+Console.WriteLine($"Parts live: {summary.ActiveCount} / {summary.ChildCount}");
+Console.WriteLine($"Listed value: {summary.ListedValue:N0} {summary.Currency}");
+Console.WriteLine($"Sold value:   {summary.SoldValue:N0} {summary.Currency}");
+```
+
+### List children
+
+```csharp
+var result = await rheo.Items.ChildrenAsync("VIN-YV1CZ714581234567");
+foreach (var c in result.Children)
+    Console.WriteLine($"{c.ExternalId} — {c.Status} — {c.Price} SEK");
 ```
 
 ### Item history
 
 ```csharp
-var history = await rheo.Items.HistoryAsync("ERP_PART_12345");
-foreach (var entry in history.History)
-    Console.WriteLine($"{entry.At} — {entry.Event}");
+var history = await rheo.Items.HistoryAsync("ERP_PART_12345");  // newest first
+foreach (var e in history.Events)
+    Console.WriteLine($"{e.CreatedAt:O} — {e.EventType}");
 ```
 
 ---
@@ -252,6 +261,29 @@ await rheo.Items.BatchUpsertAsync(new BatchUpsertRequest
 
 ---
 
+## Reseller routing
+
+If you manage several Rheo accounts under one reseller API key (e.g. a chain of
+dismantling yards), use `ForAccount` to route calls to a specific member. The value is
+the reseller's `external_id` for that member — the reference you set in the business
+**Managed accounts** UI. The returned scope sends `x-partner-account` per request and
+overrides any client-level `PartnerAccount`:
+
+```csharp
+// One client + key, many yards
+await rheo.ForAccount("10").Items.UpsertAsync("10-PART-001", data);
+await rheo.ForAccount("10").Items.UpdatePriceAsync("10-PART-001", new UpdatePriceRequest { Price = 800 });
+var yard = await rheo.ForAccount("10").Items.ListAsync(new ListItemsParams { Status = RheoItemStatus.Active });
+```
+
+`ForAccount` reuses the client's underlying `HttpClient` — it is cheap to call per
+request and you should not dispose it. Set `PartnerAccount` on `RheoClientOptions`
+instead to scope *every* call to a single account.
+
+See the [Reseller model](/integration/reseller/) for how membership and billing work.
+
+---
+
 ## Webhooks
 
 ### ASP.NET Core minimal API
@@ -276,13 +308,14 @@ app.MapPost("/webhooks/rheo", async (HttpRequest request, RheoClient rheo) =>
     switch (evt)
     {
         case ItemSoldEvent sold:
-            await dms.MarkPartSoldAsync(sold.ExternalId, sold.SalePrice);
+            // sold.Data.Account?.MemberExternalId tells you which yard (reseller endpoints)
+            await dms.MarkPartSoldAsync(sold.Data.ExternalId, sold.Data.SalePrice);
             break;
         case ListingCreatedEvent listed:
-            await dms.RecordTraderaUrlAsync(listed.ExternalId, listed.PlatformAdUrl);
+            await dms.RecordTraderaUrlAsync(listed.Data.ExternalId, listed.Data.TraderaAdUrl);
             break;
         case ListingFailedEvent failed:
-            await alerts.NotifyAsync($"Listing failed for {failed.ExternalId}: {failed.Reason}");
+            await alerts.NotifyAsync($"Listing failed for {failed.Data.ExternalId}: {failed.Data.Error}");
             break;
     }
 
@@ -319,6 +352,20 @@ public sealed class WebhooksController : ControllerBase
 ```
 
 **Read the raw request body before any JSON middleware parses it.** Pass the original bytes to `Verify()` — re-serializing a deserialized object will fail the HMAC check.
+
+### Per-endpoint secrets
+
+Each webhook endpoint has its **own** signing secret. Verify with the secret of the
+endpoint that received the event. Pass one or more secrets to `Verify()` (they override
+the client-level `WebhookSecret`) — any match succeeds, which is handy during rotation:
+
+```csharp
+var evt = rheo.Webhooks.Verify(rawBody, signature, endpointSecret);
+var rotating = rheo.Webhooks.Verify(rawBody, signature, oldSecret, newSecret);
+```
+
+See [Webhooks](/integration/webhooks/) for managing multiple endpoints, event-type
+filters, and the `account` field added to every payload for reseller routing.
 
 ---
 
@@ -392,20 +439,22 @@ sealed class WatchesDomain : DomainObject     { Brand, ModelReference, MovementT
 // ToysDomain, ToolsDomain, JewelryDomain, MusicDomain, CollectiblesDomain,
 // BeautyDomain, IndustrialDomain, OtherDomain
 
-// Event types (use pattern matching)
-abstract class RheoEvent { Id, Timestamp, ApiVersion, Type }
-  ├── ItemCreatedEvent          { ExternalId }
-  ├── ItemImagesReadyEvent      { ExternalId, ImageCount }
-  ├── ItemAIPricedEvent         { ExternalId, AiPrice }
-  ├── ItemAIListedEvent         { ExternalId, Title, Description }
-  ├── ListingCreatedEvent       { ExternalId, Platform, PlatformAdId, PlatformAdUrl }
-  ├── ListingEndedEvent         { ExternalId, Platform }
-  ├── ListingFailedEvent        { ExternalId, Platform, Reason }
-  ├── ItemSoldEvent             { ExternalId, SalePrice, Platform, BuyerCountry }
-  ├── ItemStatusChangedEvent    { ExternalId, FromStatus, ToStatus }
-  ├── WorkflowApprovalPending   { RunId, WorkflowId, NodeId, Prompt, SubjectExternalId }
-  ├── WorkflowStepCompleted     { RunId, WorkflowId, NodeId, SubjectExternalId }
-  └── WorkflowRunCompleted      { RunId, WorkflowId, Status, SubjectExternalId }
+// Event types (use pattern matching). Every event has { EventId, Timestamp, EventType, Data }.
+abstract class RheoEvent { EventId, Timestamp, EventType, Data (EventData) }
+  ├── ItemCreatedEvent       // Data.Type: "item" | "container"
+  ├── ItemImagesReadyEvent   // Data.ImagesProcessed
+  ├── ListingCreatedEvent    // Data.TraderaAdId, Data.TraderaAdUrl
+  ├── ListingEndedEvent      // Data.TraderaAdId
+  ├── ListingFailedEvent     // Data.Error
+  └── ItemSoldEvent          // Data.TraderaAdId
+
+class EventData {
+  ExternalId, RheoItemId, Platform, SalePrice, Currency,
+  Account (EventAccount?),                 // memberExternalId on reseller (members) endpoints
+  Type?, ImagesProcessed?, TraderaAdId?, TraderaAdUrl?, Error?  // populated per event
+}
+class EventAccount { RheoUserId, MemberExternalId? }
 ```
 
-`RheoEvent` uses `[JsonPolymorphic]` — deserialize using the SDK's built-in `Webhooks.Verify()` or `Webhooks.ParseEvent()` rather than `JsonSerializer.Deserialize<RheoEvent>()` directly.
+Deserialize using the SDK's `Webhooks.Verify()` / `Webhooks.ParseEvent()` — they use a
+converter that reads the `eventType` discriminator at any position in the payload.
