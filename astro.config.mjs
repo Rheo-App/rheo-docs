@@ -22,6 +22,7 @@ export default defineConfig({
             { label: 'Endpoints', link: '/integration/endpoints/' },
             { label: 'Webhooks', link: '/integration/webhooks/' },
             { label: 'Field Reference', link: '/integration/fields/' },
+            { label: 'Domain System', link: '/integration/domains/' },
             { label: 'Errors', link: '/integration/errors/' },
             { label: 'Management API', link: '/integration/management/' },
             { label: 'Partner Analytics', link: '/integration/partner/' },

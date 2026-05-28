@@ -1,0 +1,566 @@
+---
+title: Domain System
+description: The full Rheo item taxonomy — all 18 domains, their typed attributes, and how to attach metadata to any item.
+sidebar:
+  order: 7
+---
+
+## Overview
+
+Every item in Rheo belongs to exactly one **domain** — the unified classification that drives category display, Tradera publishing, structured search, and marketplace mapping.
+
+The domain is expressed as a JSON tagged union nested inside the `extended_attributes` JSONB column (stored) or the `domain` field in the integration API request body (over the wire). The `"domain"` key inside the object is the discriminant — it selects both the category slug and which attribute fields are valid.
+
+```json
+{
+  "domain": {
+    "domain": "auto_parts",
+    "partName": "Bromsok fram vänster",
+    "oemCode": "31400452"
+  }
+}
+```
+
+All field names follow **camelCase** in JSON. All slug values follow **snake_case** and match the `category` column in the `catalog_items` database table exactly.
+
+---
+
+## Taxonomy
+
+The 18 canonical domains split into two tiers.
+
+**Rich domains** — carry typed attributes that drive structured search and richer Tradera ads:
+
+| Slug | Label (EN) | Label (SV) |
+|---|---|---|
+| `auto_parts` | Auto Parts | Bildelar |
+| `vehicles` | Vehicles | Fordon |
+| `electronics` | Electronics | Elektronik |
+| `computers` | Computers | Datorer |
+| `fashion` | Fashion | Mode |
+| `books` | Books & Media | Böcker & Media |
+| `watches` | Watches | Klockor |
+
+**Unit domains** — no extra attributes; standard title/description/price search only:
+
+| Slug | Label (EN) | Label (SV) |
+|---|---|---|
+| `home_garden` | Home & Garden | Hem & Trädgård |
+| `art` | Art & Antiques | Konst & Antikviteter |
+| `sports` | Sports & Leisure | Sport & Fritid |
+| `toys` | Toys & Games | Leksaker & Spel |
+| `tools` | Tools & Machinery | Verktyg & Maskiner |
+| `jewelry` | Jewelry | Smycken |
+| `music` | Musical Instruments | Musikinstrument |
+| `collectibles` | Collectibles | Samlarföremål |
+| `beauty` | Beauty & Health | Skönhet & Hälsa |
+| `industrial` | Industrial & Commercial | Industri & Kommersiellt |
+| `other` | Other | Övrigt |
+
+Omitting `domain` entirely is equivalent to `"domain": "other"`.
+
+---
+
+## JSON shape
+
+### Rich domain
+
+A rich domain object always contains the `"domain"` discriminant key plus zero or more typed attribute fields. All attribute fields are optional — send only what you have.
+
+```json
+{
+  "domain": {
+    "domain": "<slug>",
+    "<attributeField>": "<value>"
+  }
+}
+```
+
+### Unit domain
+
+A unit domain carries no attributes. Send only the discriminant:
+
+```json
+{
+  "domain": {
+    "domain": "tools"
+  }
+}
+```
+
+### No domain
+
+Omit the `domain` key entirely. Rheo stores `null` in `extended_attributes.domain` and classifies the item as `other`.
+
+---
+
+## Rich domain reference
+
+### `auto_parts`
+
+Spare parts, body panels, engines, gearboxes, and parts from motorcycles, ATVs, snowmobiles, and caravans. Primary domain for B2B demolition partners (Recopart, Fen-Sys, etc.).
+
+The `auto_parts` domain separates three distinct concepts: the **donor vehicle** the part came from, the **part** being sold, and the **condition** of the part.
+
+```json
+{
+  "domain": {
+    "domain": "auto_parts",
+    "vehicle": {
+      "manufacturer": "Kawasaki",
+      "model": "ER-6F",
+      "year": 2006,
+      "vehicleType": "MC"
+    },
+    "part": {
+      "name": "Stötdämpare Bak",
+      "oemNumber": "31400452",
+      "catalogCodes": {
+        "recopart": "7118",
+        "fen-sys": "SH-REAR-42",
+        "tecdoc": "TD-88291"
+      }
+    },
+    "conditionGrade": "A",
+    "conditionNote": "Smärrepig"
+  }
+}
+```
+
+#### `vehicle` object — the donor vehicle
+
+| Field | Type | Description |
+|---|---|---|
+| `manufacturer` | string | Manufacturer of the donor vehicle, e.g. `"Kawasaki"`, `"Volvo"`. |
+| `model` | string | Model name of the donor vehicle, e.g. `"ER-6F"`, `"XC90"`. |
+| `year` | integer | Model year of the donor vehicle. |
+| `vehicleType` | string | Vehicle category the part came from. See values below. |
+
+**Vehicle types**
+
+| Value | Meaning |
+|---|---|
+| `Bil` | Passenger car |
+| `MC` | Motorcycle |
+| `Skoter` | Snowmobile |
+| `ATV` | ATV / quad bike |
+| `Husvagn` | Caravan / trailer |
+| `Moped` | Moped |
+| `Traktor` | Tractor |
+
+#### `part` object — the part being sold
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Human-readable part name, e.g. `"Stötdämpare Bak"`, `"Bromsok fram vänster"`. |
+| `oemNumber` | string | OEM manufacturer part number, e.g. `"31400452"`. Universally understood — this is the number on Volvo's, BMW's, or Kawasaki's own parts catalog. |
+| `catalogCodes` | object | Part-type codes from external ERP and catalog systems. Key is the system name, value is that system's code. See below. |
+
+#### `catalogCodes` — multi-system part type identifiers
+
+Different ERP systems classify parts under their own internal codes. `catalogCodes` is a flat key-value map that stores all of them on the same item, so any system can look up parts by its own native code without affecting others.
+
+```json
+"catalogCodes": {
+  "recopart": "7118",
+  "fen-sys": "SH-REAR-42",
+  "tecdoc": "TD-88291"
+}
+```
+
+The key is a short, stable system identifier chosen by the integration partner. The value is whatever code that system uses internally for this part type.
+
+**Querying by catalog code** (JSONB path):
+```
+extended_attributes->'part'->'catalogCodes'->>'recopart' = '7118'
+```
+
+**Lookup endpoint** (filter by system + code):
+```
+GET /integration/v1/items?catalogSystem=recopart&catalogCode=7118
+```
+
+To add a new ERP system, simply use a new key — no schema changes required.
+
+#### Top-level condition fields
+
+| Field | Type | Description |
+|---|---|---|
+| `conditionGrade` | string | Standardised condition rating. See grades below. |
+| `conditionNote` | string | Free-text annotation, e.g. `"Smärrepig"`, `"Lacks missing"`. Appended to Tradera ad. |
+
+**Condition grades**
+
+| Grade | Meaning |
+|---|---|
+| `A*` | New old stock — unused |
+| `A` | Excellent — minimal wear, fully functional |
+| `B` | Good — normal wear, fully functional |
+| `C` | Fair — visible wear or minor damage, functional |
+
+**Special search field:** `oem_number` — surfaces a dedicated OEM number filter in the Rheo frontend.
+
+---
+
+### `vehicles`
+
+Whole vehicles for sale — cars, motorcycles, boats, caravans.
+
+```json
+{
+  "domain": {
+    "domain": "vehicles",
+    "registrationPlate": "ABC123",
+    "make": "Volvo",
+    "model": "XC90",
+    "year": 2018,
+    "mileageKm": 94000,
+    "fuelType": "diesel",
+    "color": "svart"
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `registrationPlate` | string | Swedish registration plate. Triggers `biluppgifter.se` lookup — Rheo can auto-fill make/model/year if only the plate is provided. |
+| `make` | string | Vehicle brand, e.g. `"Volvo"`, `"Honda"`. |
+| `model` | string | Model name, e.g. `"XC90"`, `"CB500F"`. |
+| `year` | integer | Model year. |
+| `mileageKm` | integer | Odometer reading in kilometres. |
+| `fuelType` | string | `petrol`, `diesel`, `electric`, or `hybrid`. |
+| `color` | string | Body colour. |
+
+**Special search field:** `plate` — a registration plate input that triggers a live plate lookup and auto-populates make/model/year.
+
+**Plate lookup:** Resolve a plate before sending:
+
+```
+GET https://market.rheo.se/vehicles/lookup?plate=ABC123
+```
+
+```json
+{
+  "registrationPlate": "ABC123",
+  "make": "Volvo",
+  "model": "XC90",
+  "year": 2018,
+  "fuelType": "diesel",
+  "color": "svart"
+}
+```
+
+Results are cached 24 hours. Returns `404` if the plate is unknown.
+
+---
+
+### `electronics`
+
+Consumer electronics, cameras, audio equipment, phones.
+
+```json
+{
+  "domain": {
+    "domain": "electronics",
+    "serialNumber": "SN-A1B2C3",
+    "memoryGb": 256,
+    "batteryHealthPercentage": 88
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `serialNumber` | string | Device serial number. |
+| `memoryGb` | integer | Storage capacity in GB. |
+| `batteryHealthPercentage` | integer | Battery health (0–100). |
+
+---
+
+### `computers`
+
+PCs, laptops, tablets, and peripherals. Uses the same attribute shape as `electronics`.
+
+```json
+{
+  "domain": {
+    "domain": "computers",
+    "serialNumber": "C02XJ0N0JHD3",
+    "memoryGb": 512,
+    "batteryHealthPercentage": 92
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `serialNumber` | string | Device serial number. |
+| `memoryGb` | integer | Storage / RAM in GB depending on context. |
+| `batteryHealthPercentage` | integer | Battery health (0–100). Relevant for laptops. |
+
+---
+
+### `fashion`
+
+Clothing, shoes, bags, and accessories.
+
+```json
+{
+  "domain": {
+    "domain": "fashion",
+    "size": "M",
+    "material": "Cotton",
+    "gender": "unisex"
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `size` | string | Size label. Free-form — e.g. `"M"`, `"42"`, `"UK 8"`. |
+| `material` | string | Primary material. |
+| `gender` | string | `mens`, `womens`, `unisex`, or `kids`. |
+
+---
+
+### `books`
+
+Books, magazines, DVDs, and vinyl records.
+
+```json
+{
+  "domain": {
+    "domain": "books",
+    "isbn": "978-91-7741-234-5",
+    "author": "Astrid Lindgren",
+    "publisher": "Rabén & Sjögren",
+    "language": "sv"
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `isbn` | string | ISBN-10 or ISBN-13. |
+| `author` | string | Author name(s). |
+| `publisher` | string | Publisher name. |
+| `language` | string | BCP 47 language code, e.g. `"sv"`, `"en"`. |
+
+**Special search field:** `isbn` — a dedicated ISBN input; a future book metadata lookup will auto-populate title and author.
+
+---
+
+### `watches`
+
+Wristwatches and pocket watches.
+
+```json
+{
+  "domain": {
+    "domain": "watches",
+    "brand": "Omega",
+    "modelReference": "311.30.42.30.01.005",
+    "movementType": "automatic",
+    "caseSizeMm": 42
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `brand` | string | Watch brand, e.g. `"Rolex"`, `"Omega"`, `"Seiko"`. |
+| `modelReference` | string | Model reference number. |
+| `movementType` | string | `automatic`, `quartz`, or `manual`. |
+| `caseSizeMm` | integer | Case diameter in millimetres. |
+
+---
+
+## Unit domain reference
+
+Unit domains require only the `"domain"` discriminant. Do not include any other fields — they will be silently ignored.
+
+```json
+{ "domain": { "domain": "tools" } }
+{ "domain": { "domain": "jewelry" } }
+{ "domain": { "domain": "art" } }
+```
+
+The complete list of unit slugs: `home_garden`, `art`, `sports`, `toys`, `tools`, `jewelry`, `music`, `collectibles`, `beauty`, `industrial`, `other`.
+
+---
+
+## Extended attributes wrapper
+
+In the database and in full item responses the domain is wrapped inside `ItemExtendedData`:
+
+```json
+{
+  "externalReference": "ERP_PART_99182",
+  "source": "recopart",
+  "domain": {
+    "domain": "auto_parts",
+    "partName": "Bromsok",
+    "conditionGrade": "B"
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `externalReference` | string | Partner's internal ID for this item. Stored and returned as-is. |
+| `source` | string | Origin system that created the item, e.g. `"recopart"`, `"tradera"`, `"manual"`. |
+| `domain` | object | Tagged-union domain object. `null` for unit domains sent without attributes. |
+
+When submitting via the integration API you set these at the top level of the request body:
+
+```json
+{
+  "title": "Bromsok fram vänster — Volvo XC90 2018",
+  "externalReference": "ERP_PART_99182",
+  "domain": { "domain": "auto_parts", ... }
+}
+```
+
+---
+
+## Domain search fields
+
+Rich domains expose additional search filter inputs in the Rheo frontend. These are driven entirely by the domain — no frontend configuration is needed.
+
+| Domain | Search key | Input type | Behaviour |
+|---|---|---|---|
+| `vehicles` | `plate` | Registration plate | Live lookup → auto-fills make/model/year |
+| `auto_parts` | `oem_number` | Text | Filters by `oemNumber` in `extended_attributes->'part'` |
+| `books` | `isbn` | Text | Filters by `isbn`; future: auto-populates book metadata |
+
+All other domains use standard full-text search across title and description only.
+
+---
+
+## Categories API
+
+Two utility endpoints are available without an API key for category introspection.
+
+### GET /categories
+
+Returns the full taxonomy with labels and search fields.
+
+```
+GET https://market.rheo.se/categories
+```
+
+```json
+[
+  {
+    "slug": "auto_parts",
+    "labelEn": "Auto Parts",
+    "labelSv": "Bildelar",
+    "descriptionEn": "Car parts, engines, gearboxes and body panels",
+    "searchFields": [
+      {
+        "key": "oem_code",
+        "labelSv": "OEM-kod",
+        "labelEn": "OEM Code",
+        "fieldType": "text",
+        "placeholder": "31338723"
+      }
+    ]
+  }
+]
+```
+
+### POST /categories/convert
+
+Convert a category ID between an external marketplace and Rheo.
+
+```json
+{
+  "fromMarket": "tradera",
+  "externalId": "525",
+  "toMarket": "rheo"
+}
+```
+
+```json
+{
+  "rheoCategory": "electronics",
+  "externalId": null,
+  "market": "tradera",
+  "confidence": 1.0,
+  "aiConverted": false
+}
+```
+
+| Field | Description |
+|---|---|
+| `fromMarket` | `"tradera"` or `"rheo"` |
+| `toMarket` | The other of `"tradera"` / `"rheo"` |
+| `externalId` | Category ID in the source market |
+
+When no static mapping exists the server falls back to Gemini AI classification and returns `confidence: 0.75` with `aiConverted: true`.
+
+**Tradera category map (static)**
+
+| Tradera ID | Rheo slug |
+|---|---|
+| 516 | `art` |
+| 517, 533 | `toys` |
+| 520 | `vehicles` |
+| 521 | `books` |
+| 523 | `industrial` |
+| 524 | `computers` |
+| 525 | `electronics` |
+| 527 | `sports` |
+| 529 | `home_garden` |
+| 530 | `fashion` |
+| 531 | `watches` |
+| 535 | `music` |
+| 536 | `collectibles` |
+| 537 | `beauty` |
+| 541 | `tools` |
+| 8174–8178 | `jewelry` |
+| 8290–8300 | `auto_parts` |
+
+---
+
+## Accepted slug aliases
+
+`FromStr` parsing is forgiving. The following aliases resolve to the canonical slug:
+
+| Input | Resolves to |
+|---|---|
+| `elektronik` | `electronics` |
+| `mode`, `clothing` | `fashion` |
+| `klockor` | `watches` |
+| `home`, `hem`, `hem_tradgard` | `home_garden` |
+| `konst` | `art` |
+| `sport` | `sports` |
+| `bocker`, `media` | `books` |
+| `leksaker` | `toys` |
+| `fordon` | `vehicles` |
+| `verktyg` | `tools` |
+| `autoparts`, `car_parts`, `bildelar`, `automotive_part`, `reservdel` | `auto_parts` |
+| `smycken` | `jewelry` |
+| `datorer` | `computers` |
+| `musikinstrument` | `music` |
+| `samlarforemal` | `collectibles` |
+| `skonhet` | `beauty` |
+| `industri` | `industrial` |
+| `ovrigt`, `` (empty string) | `other` |
+
+Dashes and spaces are normalized to underscores before matching, and input is lowercased.
+
+---
+
+## Tradera ad generation
+
+When `autoPublishTradera: true`, Rheo appends a structured block at the end of the Tradera ad description built from the domain attributes:
+
+```
+--- Teknisk specifikation ---
+OEM: 31400452
+Skick: B
+Passar: Volvo XC90 (2018)
+```
+
+The more attribute fields you include, the better the ad performs in Tradera's internal search. For `auto_parts`, `oemCode` and `partName` are the highest-impact fields.
