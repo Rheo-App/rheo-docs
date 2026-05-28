@@ -501,25 +501,27 @@ When no static mapping exists the server falls back to Gemini AI classification 
 
 **Tradera category map (static)**
 
-| Tradera ID | Rheo slug |
-|---|---|
-| 516 | `art` |
-| 517, 533 | `toys` |
-| 520 | `vehicles` |
-| 521 | `books` |
-| 523 | `industrial` |
-| 524 | `computers` |
-| 525 | `electronics` |
-| 527 | `sports` |
-| 529 | `home_garden` |
-| 530 | `fashion` |
-| 531 | `watches` |
-| 535 | `music` |
-| 536 | `collectibles` |
-| 537 | `beauty` |
-| 541 | `tools` |
-| 8174–8178 | `jewelry` |
-| 8290–8300 | `auto_parts` |
+The map is bidirectional but the IDs differ by direction. `from_tradera` converts incoming Tradera category IDs to Rheo slugs. `to_tradera_primary` is the single Tradera ID Rheo sends when publishing a listing.
+
+| Tradera ID (inbound) | Rheo slug | Tradera ID (outbound) |
+|---|---|---|
+| 516 | `art` | 516 |
+| 517, 533 | `toys` | 533 |
+| 520 | `vehicles` | 520 |
+| 521 | `books` | 521 |
+| 523 | `industrial` | 523 |
+| 524 | `computers` | 524 |
+| 525, 534 | `electronics` | 525 |
+| 527 | `sports` | 527 |
+| 529 | `home_garden` | 529 |
+| 530 | `fashion` | 530 |
+| 531 | `watches` | 531 |
+| 535 | `music` | 535 |
+| 536 | `collectibles` | 536 |
+| 537 | `beauty` | 537 |
+| 541 | `tools` | 541 |
+| 8174–8178 | `jewelry` | 531 |
+| 8290–8300 | `auto_parts` | 520 |
 
 ---
 

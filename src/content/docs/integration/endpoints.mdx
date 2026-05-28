@@ -40,14 +40,23 @@ Create or update an item. This endpoint is **idempotent** — calling it with th
   ],
   "domain": {
     "domain": "auto_parts",
-    "partName": "Bromsok fram vänster",
-    "oemCode": "31400452",
-    "manufacturer": "Volvo",
-    "compatibleModels": ["XC90", "XC90 II"],
-    "donorVehicleYear": 2018,
-    "vehicleType": "Bil",
-    "conditionGrade": "B"
+    "vehicle": {
+      "manufacturer": "Volvo",
+      "model": "XC90",
+      "year": 2018,
+      "vehicleType": "Bil"
+    },
+    "part": {
+      "name": "Bromsok fram vänster",
+      "oemNumber": "31400452",
+      "catalogCodes": {
+        "recopart": "7118"
+      }
+    },
+    "conditionGrade": "B",
+    "conditionNote": null
   },
+  "schemaVersion": "1.0.0",
   "autoPublishTradera": true,
   "useAiEnhancement": false
 }
